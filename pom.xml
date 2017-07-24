@@ -1,6 +1,56 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
-  <modelVersion>4.0.0</modelVersion>
-  <groupId>org.janelia.saalfeldlab</groupId>
-  <artifactId>bigcat-spark</artifactId>
-  <version>0.0.1-SNAPSHOT</version>
+	<modelVersion>4.0.0</modelVersion>
+  
+	<parent>
+		<groupId>sc.fiji</groupId>
+		<artifactId>pom-bigdataviewer</artifactId>
+		<version>5.0.0</version>
+	</parent>
+  
+	<artifactId>bigcat-spark</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	
+  	<name>BIGCAT-SPARK</name>
+	<description>Spark downsampler for BIGCAT</description>
+	
+	<properties>
+		<scijava.jvm.version>1.8</scijava.jvm.version>
+	</properties>
+	
+	<profiles>
+		<profile>
+			<id>disable-java8-doclint</id>
+			<activation>
+				<jdk>[1.8,)</jdk>
+			</activation>
+			<properties>
+				<additionalparam>-Xdoclint:none</additionalparam>
+			</properties>
+		</profile>
+	</profiles>
+
+	<repositories>
+		<repository>
+			<id>imagej.public</id>
+			<url>http://maven.imagej.net/content/groups/public</url>
+		</repository>
+	</repositories>
+	
+	<dependencies>
+		<dependency>
+			<groupId>sc.fiji</groupId>
+			<artifactId>bigcat</artifactId>
+			<version>0.0.3-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>net.imglib2</groupId>
+			<artifactId>imglib2</artifactId>
+			<version>4.2.0</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.spark</groupId>
+			<artifactId>spark-core_2.11</artifactId>
+			<version>2.1.0</version>
+		</dependency>
+	</dependencies>
 </project>
