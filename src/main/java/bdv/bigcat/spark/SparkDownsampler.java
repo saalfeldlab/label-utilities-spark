@@ -15,42 +15,88 @@ import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+
 public class SparkDownsampler
 {
-	private static String groupName = "/home/thistlethwaiten/n5-test";
-	private static String datasetName = "sample-fullres-b3x3";
-	private static String downsampledDatasetName = "testspark6-downscaled-13x13-b3x3";
-
-	private DatasetAttributes attributes;
-	private long[] dimensions;
-	private int[] blockSize;
-
-	// TODO change this to either take the attributes, a reader and a datasetname, or a groupname and a datasetname,
-	// and do the rest automatically
-	public SparkDownsampler(N5Reader reader, String readDatasetName) throws IOException {
-		this.attributes = reader.getDatasetAttributes(readDatasetName);
-		this.dimensions = attributes.getDimensions();
-		this.blockSize = attributes.getBlockSize();
+	static public class Parameters {
+		
+		@Parameter( names = { "--igroupname", "--igroup", "-ig" }, description = "Input group name (N5 group)" )
+		public String inputGroupName = null;
+		
+		@Parameter( names = { "--idatasetname", "--idata", "-id" }, description = "Input dataset name (N5 relative path from group)" )
+		public String inputDatasetName = null;
+		
+		@Parameter( names = { "--ogroupname", "--ogroup", "-og" }, description = "Output group name (N5 group)")
+		public String outputGroupName = null;
+		
+		@Parameter( names = { "--odatasetname", "--odata", "-od" }, description = "Output dataset name (N5 relative path from group)")
+		public String outputDatasetName = null;
+		
+		@Parameter( names = { "--factor", "-f"}, description = "Factor by which to downscale the input image" )
+		public List<Integer> factor = new ArrayList<Integer>();
+		
+		@Parameter( names = { "--parallelblocks", "-pb"}, description = "Size of the blocks (in cells) to parallelize with Spark" )
+		public List<Integer> parallelBlockSize = new ArrayList<Integer>();
+		
+		@Parameter( names = { "--master", "-m"}, description = "Spark master" )
+		public String sparkMaster = "local";
+		
+		
+		public boolean init() {
+			if(inputGroupName == null || inputDatasetName == null || factor.size()==0)
+				return false;
+			
+			if(parallelBlockSize.size()==0)
+				for(int i = 0; i < factor.size(); i ++)
+					parallelBlockSize.add(16);
+			
+			if(outputGroupName == null)
+				outputGroupName = inputGroupName; // default to using same group
+			
+			if(outputDatasetName == null) {
+				outputDatasetName = inputDatasetName + "-downscaled-";
+				for(int i = 0; i < factor.size(); i ++)
+					outputDatasetName += (i!=0?"x":"") + i;
+			}
+			return true;
+		}
 	}
+	
 	
 	public static void main(String[] args) throws IOException {
-		SparkConf conf      = new SparkConf().setMaster("local").setAppName( "SparkDownsampler" );
+		final Parameters params = new Parameters();
+		new JCommander( params, args );
+		
+		if(!params.init()) {
+			// show help
+			System.out.println("Incorrect usage");
+			return;
+		}
+		
+		SparkConf conf = new SparkConf().setMaster(params.sparkMaster).setAppName( "SparkDownsampler" );
 		JavaSparkContext sc = new JavaSparkContext( conf );
-		new SparkDownsampler(new N5FSReader(groupName), datasetName).downsample(
-				sc, new int[] {13,13}, new int[] {3,8}, groupName, downsampledDatasetName, CompressionType.RAW);
+		SparkDownsampler.downsample(sc,
+				new N5FSReader(params.inputGroupName), params.inputGroupName, params.inputDatasetName,
+				params.factor.stream().mapToInt(i->i).toArray(), params.parallelBlockSize.stream().mapToInt(i->i).toArray(),
+				params.outputGroupName, params.outputDatasetName,
+				CompressionType.RAW);
 	}
-	
-	// TODO test with a non-1 block size
-	// parallelSize is (arbitrarily) in CELLS/blocks in the downscaled space
-	// i.e. if you specify parallelSize = 3x3 when cellsize is 2x2 and the downscaling is 5x5,
-	// each spark parallel thing will be dealing with 9 cells, each of which represents 4 * 25 = 100 pixels of full-res space,
-	// = 900 pixels per spark parallelization
-	
-	
-	// in spark it's going to read in from N5 using the cell coordinates...
-	public void downsample(JavaSparkContext sc, int[] downsampleFactor, int[] parallelSize, String outputGroupName, String outputDatasetName, CompressionType compressionType) throws IOException {
-		List<DownsampleBlock> parallelizeSections = new ArrayList<DownsampleBlock>();
 
+	public static void downsample(JavaSparkContext sc,
+			N5Reader reader, String readGroupName, String readDatasetName,
+			int[] downsampleFactor, int[] parallelSize,
+			String outputGroupName, String outputDatasetName,
+			CompressionType compressionType) throws IOException  {
+	
+		DatasetAttributes attributes = reader.getDatasetAttributes(readDatasetName);
+
+		long[] dimensions = attributes.getDimensions();
+		int[] blockSize = attributes.getBlockSize();
+		
+		List<DownsampleBlock> parallelizeSections = new ArrayList<DownsampleBlock>();
+		
 		int nDim = attributes.getNumDimensions();
 		
 		long[] downsampledDimensions = new long[nDim];
@@ -61,18 +107,12 @@ public class SparkDownsampler
 		
 		for(int d = 0; d < nDim; ) {
 			
-			for(int i = 0; i < nDim; i ++) {
+			for(int i = 0; i < nDim; i ++)
 				actualSize[i] = (int) Math.min(parallelSize[i]*blockSize[i], downsampledDimensions[i]-offset[i]);
-			}
-			// actualSize is in pixels, not sure why (?), after parallelization it gets translated back to cells or something
 
-//			actualSize[i] = (int) ((offset[i]+(parallelSize[i]*blockSize[i]) < dimensions[i]) ? parallelSize[i]*blockSize[i] : dimensions[i]-offset[i]);
-			
-			
-//			System.out.println("===Offset is " + Arrays.toString(offset));
 			parallelizeSections.add(new DownsampleBlock(offset.clone(), actualSize.clone()));
 			
-			
+
 			for( d = 0; d < nDim; d++) {
 				offset[d] += parallelSize[d]*blockSize[d];
 				if(offset[d] < downsampledDimensions[d])
@@ -84,14 +124,9 @@ public class SparkDownsampler
 
 		N5Writer writer = new N5FSWriter(outputGroupName);
 		writer.createDataset(outputDatasetName, downsampledDimensions, blockSize, DataType.UINT8, compressionType);
-		
-		downsampleHelper(sc, parallelizeSections, downsampleFactor, outputGroupName, outputDatasetName);
-	}
-	
-	private static void downsampleHelper(JavaSparkContext sc, List<DownsampleBlock> parallelizeSections, int[] downsampleFactor, String outputGroupName, String outputDatasetName ) {
-		
+
 		Integer output = sc.parallelize(parallelizeSections)
-			.map( new SparkDownsampleFunction(groupName, datasetName, downsampleFactor, outputGroupName, outputDatasetName))
+			.map( new SparkDownsampleFunction(readGroupName, readDatasetName, downsampleFactor, outputGroupName, outputDatasetName))
 			.reduce( (i,j) -> i+j);
 		
 		System.out.println("output is " + output);
