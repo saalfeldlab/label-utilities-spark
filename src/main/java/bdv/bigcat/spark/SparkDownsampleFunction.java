@@ -25,15 +25,15 @@ import net.imglib2.view.Views;
 public class SparkDownsampleFunction implements Function<DownsampleBlock, Integer> {
 	
 	private static final long serialVersionUID = 1384028449836651388L;
-	private final String groupName;
-	private final String datasetName;
+	private final String inputGroupName;
+	private final String inputDatasetName;
 	private final int[] factor;
 	private final String outputGroupName;
 	private final String outputDatasetName;
 
-	public SparkDownsampleFunction(String groupName, String datasetName, int[] factor, String outputGroupName, String outputDatasetName ) {
-		this.groupName = groupName;
-		this.datasetName = datasetName;
+	public SparkDownsampleFunction(String inputGroupName, String inputDatasetName, int[] factor, String outputGroupName, String outputDatasetName ) {
+		this.inputGroupName = inputGroupName;
+		this.inputDatasetName = inputDatasetName;
 		this.factor = factor;
 		this.outputGroupName = outputGroupName;
 		this.outputDatasetName = outputDatasetName;
@@ -42,10 +42,8 @@ public class SparkDownsampleFunction implements Function<DownsampleBlock, Intege
 	@Override
 	public Integer call(DownsampleBlock targetRegion) throws Exception {
 		
-//		System.out.println("SparkDownsampleFunction.call() with targetRegion of " + targetRegion);
-		
-		N5Reader reader = new N5FSReader(groupName);
-		DatasetAttributes attr = reader.getDatasetAttributes(datasetName);
+		N5Reader reader = new N5FSReader(inputGroupName);
+		DatasetAttributes attr = reader.getDatasetAttributes(inputDatasetName);
 		
 		long[] dimensions = attr.getDimensions();
 		int[] blocksize = attr.getBlockSize();
@@ -60,10 +58,9 @@ public class SparkDownsampleFunction implements Function<DownsampleBlock, Intege
 		long[] actualSize = new long[nDim];
 		
 		
-		final CacheLoader< Long, Cell< VolatileLabelMultisetArray > > cacheLoader = new N5CacheLoader(reader, datasetName);
+		final CacheLoader< Long, Cell< VolatileLabelMultisetArray > > cacheLoader = new N5CacheLoader(reader, inputDatasetName);
 		
-		// TODO 10 is sort of arbitrary for maxSoftRefs
-		final BoundedSoftRefLoaderCache< Long, Cell< VolatileLabelMultisetArray > > cache = new BoundedSoftRefLoaderCache<>( 10 );
+		final BoundedSoftRefLoaderCache< Long, Cell< VolatileLabelMultisetArray > > cache = new BoundedSoftRefLoaderCache<>( 1 );
 		final LoaderCacheAsCacheAdapter< Long, Cell< VolatileLabelMultisetArray > > wrappedCache = new LoaderCacheAsCacheAdapter<>( cache, cacheLoader );
 		
 		final CachedCellImg<LabelMultisetType,VolatileLabelMultisetArray> inputImg = new CachedCellImg<LabelMultisetType,VolatileLabelMultisetArray>(
@@ -80,31 +77,22 @@ public class SparkDownsampleFunction implements Function<DownsampleBlock, Intege
 		
 		for(int d = 0; d < nDim; ) {
 			
-			// this needs to be redone for the bounds checking TODO
 			Arrays.setAll(actualLocation, i -> factor[i] * (targetMin[i] + offset[i]));
 			Arrays.setAll(actualSize, i -> Math.min(
 					factor[i] * (offset[i] + blocksize[i] > targetMin[i] + targetSize[i] ? (targetMin[i] + targetSize[i] - offset[i]) : blocksize[i]),
-					dimensions[i] - actualLocation[i])
-					);
-			
-//			System.out.println("  telling downscaler to create cell from actualLocation="+Arrays.toString(actualLocation)+",actualSize="+Arrays.toString(actualSize));
-			
+					dimensions[i] - actualLocation[i]));
+						
 			downscaledCell = LabelMultisetTypeDownscaler.createDownscaledCell(Views.offsetInterval(inputImg, actualLocation, actualSize), factor);
 			
 			byte[] bytes = new byte[LabelMultisetTypeDownscaler.getSerializedVolatileLabelMultisetArraySize(downscaledCell)];
 			LabelMultisetTypeDownscaler.serializeVolatileLabelMultisetArray(downscaledCell, bytes);
-			
-			// TODO check: is the block size here already capped at edge cases (I don't think it is), does it need to be? etc.
-//			System.out.println("I am a spark downsampler, offset=" + Arrays.toString(offset));
 			
 			for(int i = 0; i < nDim; i ++) writeLocation[i] = (targetMin[i] + offset[i])/blocksize[i];
 			
 			final ByteArrayDataBlock dataBlock = new ByteArrayDataBlock(blocksize, writeLocation, bytes);
 			writer.writeBlock(outputDatasetName, writerAttributes, dataBlock);
 			
-			
 			numCellsDownscaled++;
-			
 			
 			for( d = 0; d < nDim; d++) {
 				offset[d] += blocksize[d];
@@ -117,5 +105,4 @@ public class SparkDownsampleFunction implements Function<DownsampleBlock, Intege
 		
 		return numCellsDownscaled;
 	}
-
 }
