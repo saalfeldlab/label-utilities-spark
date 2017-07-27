@@ -17,8 +17,8 @@ import bdv.bigcat.ui.VolatileLabelMultisetARGBConverter;
 import bdv.img.cache.VolatileGlobalCellCache;
 import bdv.img.h5.H5LabelMultisetSetupImageLoader;
 import bdv.labels.labelset.LabelMultisetType;
-import bdv.labels.labelset.N5CacheLoader;
 import bdv.labels.labelset.LabelUtils;
+import bdv.labels.labelset.N5CacheLoader;
 import bdv.labels.labelset.VolatileLabelMultisetArray;
 import bdv.labels.labelset.VolatileLabelMultisetType;
 import bdv.util.Bdv;
@@ -76,11 +76,7 @@ public class HDFConverter {
 		
 		final GoldenAngleSaturatedARGBStream argbStream = new GoldenAngleSaturatedARGBStream( new FragmentSegmentAssignment( new LocalIdService() ) );
 		final RandomAccessibleInterval<VolatileARGBType> volatileConverted = Converters.convert((RandomAccessibleInterval<VolatileLabelMultisetType>)img, new VolatileLabelMultisetARGBConverter( argbStream ), new VolatileARGBType());
-//		final RandomAccessibleInterval<ARGBType> converted = Converters.convert(volatileConverted, (a, b) -> b.set(a.get()), new ARGBType());
-		
-//		ImageJFunctions.show( converted, "pls show" );
-//		RandomAccessibleIntervalSource<ARGBType> sortOf = new RandomAccessibleIntervalSource<ARGBType>(converted, new ARGBType(), "my argb source");
-//		ImageJFunctions.show( converted, dispName );
+
 		return BdvFunctions.show(volatileConverted, "BDV - " + dname, options);
 	}
 	
@@ -116,10 +112,7 @@ public class HDFConverter {
 			Arrays.setAll(actualCellDimensions, i -> (int) Math.min(cellDimensions[i], dimensions[i]-offset[i]));
 			
 			IntervalView<LabelMultisetType> tm = Views.offsetInterval(img, offset, Arrays.stream(actualCellDimensions).asLongStream().toArray());
-			
-//			LabelMultisetType[] thisCell = new LabelMultisetType[(int) Intervals.numElements(n5blocksize)];
-			
-			
+						
 			final DatasetAttributes attributes = n5.getDatasetAttributes(datasetName);
 			
 			long[] cellOffset = new long[nDim];
@@ -129,7 +122,7 @@ public class HDFConverter {
 			
 			
 			final ByteArrayDataBlock dataBlock = new ByteArrayDataBlock(actualCellDimensions, cellOffset,
-					LabelUtils.bytesFromLabelMultisetTypes(Views.flatIterable(tm), (int)Intervals.numElements(actualCellDimensions)));
+					LabelUtils.serializeLabelMultisetTypes(Views.flatIterable(tm), (int)Intervals.numElements(actualCellDimensions)));
 			
 			n5.writeBlock(datasetName, attributes, dataBlock);
 	
