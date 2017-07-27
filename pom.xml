@@ -100,7 +100,7 @@
 				<configuration>
 					<archive>
 						<manifest>
-							<mainClass>bdv.bigcat.spark.SparkDownsampler</mainClass>
+							<mainClass>bdv.bigcat.util.HDFConverter</mainClass>
 						</manifest>
 					</archive>
 					<descriptorRefs>
