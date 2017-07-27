@@ -39,7 +39,7 @@ public class HDFConverter {
 		@Parameter( names = { "--datasetname", "--data", "-d" }, description = "Output dataset name (N5 relative path from group)")
 		public String outputDatasetName = null;
 		
-		@Parameter( names = { "--cellsize", "-c"}, description = "Size of cells to use in the output N5 dataset" )
+		@Parameter( names = { "--cellsize", "-cs"}, description = "Size of cells to use in the output N5 dataset" )
 		public List<Integer> cellSize = Arrays.asList(new Integer[] {64, 64, 8});
 
 		@Parameter( names = { "--label", "-l" }, description = "Path to labels in HDF5 file" )
