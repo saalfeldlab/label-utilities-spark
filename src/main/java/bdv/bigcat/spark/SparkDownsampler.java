@@ -74,32 +74,13 @@ public class SparkDownsampler
 			return;
 		}
 		
-		CompressionType compressionType;
-		switch(params.compressionType) {
-		case "XZ":
-			compressionType = CompressionType.XZ;
-			break;
-		case "LZ4":
-			compressionType = CompressionType.LZ4;
-			break;
-		case "GZIP":
-			compressionType = CompressionType.GZIP;
-			break;
-		case "BZIP2":
-			compressionType = CompressionType.BZIP2;
-			break;
-		case "RAW":
-		default:
-			compressionType = CompressionType.RAW;
-		}
-		
 		SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
 		JavaSparkContext sc = new JavaSparkContext( conf );
 		SparkDownsampler.downsample(sc,
 				new N5FSReader(params.inputGroupName), params.inputGroupName, params.inputDatasetName,
 				params.factor.stream().mapToInt(i->i).toArray(), params.parallelBlockSize.stream().mapToInt(i->i).toArray(),
 				params.outputGroupName, params.outputDatasetName,
-				compressionType);
+				CompressionType.valueOf(params.compressionType));
 	}
 
 	public static void downsample(JavaSparkContext sc,
