@@ -43,7 +43,10 @@ public class HDFConverter {
 		public List<Integer> cellSize = Arrays.asList(new Integer[] {64, 64, 8});
 
 		@Parameter( names = { "--label", "-l" }, description = "Path to labels in HDF5 file" )
-		public String labelPath = "/volumes/labels/neuron_ids";		
+		public String labelPath = "/volumes/labels/neuron_ids";	
+		
+		@Parameter( names = { "--compression", "-c"}, description = "Compression type to use in output N5 dataset" )
+		public String compressionType = "RAW";	
 		
 		
 		public boolean init() {
@@ -66,9 +69,13 @@ public class HDFConverter {
 		}
 		
 		long startTime = System.currentTimeMillis();
+		
 		int[] cellSize = new int[params.cellSize.size()];
 		Arrays.setAll(cellSize, i -> params.cellSize.get(i));
-		convertHDF5toN5(params.inputHDF5, params.labelPath, cellSize, params.outputGroupName, params.outputDatasetName);
+		
+		convertHDF5toN5(params.inputHDF5, params.labelPath, cellSize, params.outputGroupName, params.outputDatasetName,
+				CompressionType.valueOf(params.compressionType));
+		
 		long endTime = System.currentTimeMillis();
 		
 		String formattedTime = DurationFormatUtils.formatDuration(endTime-startTime, "HH:mm:ss.SSS");
@@ -76,7 +83,8 @@ public class HDFConverter {
 				" in " + formattedTime);
 	}
 	
-	public static void convertHDF5toN5(String hdf5Path, String labelsPath, int[] cellDimensions, String outputGroupName, String outputDatasetName) throws IOException
+	public static void convertHDF5toN5(String hdf5Path, String labelsPath,int[] cellDimensions,
+			String outputGroupName, String outputDatasetName, CompressionType compressionType) throws IOException
 	{
 		IHDF5Reader reader = HDF5Factory.open(hdf5Path);
 		
@@ -91,7 +99,7 @@ public class HDFConverter {
 		img.dimensions(dimensions);
 		
 		N5Writer n5 = N5.openFSWriter(outputGroupName);
-		n5.createDataset(outputDatasetName, dimensions, cellDimensions, DataType.UINT8, CompressionType.RAW);
+		n5.createDataset(outputDatasetName, dimensions, cellDimensions, DataType.UINT8, compressionType);
 		
 		final long[] offset = new long[nDim];
 		
