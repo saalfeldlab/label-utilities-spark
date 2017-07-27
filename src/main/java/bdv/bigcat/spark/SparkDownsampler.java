@@ -40,6 +40,9 @@ public class SparkDownsampler
 		@Parameter( names = { "--parallelblocks", "-pb"}, description = "Size of the blocks (in cells) to parallelize with Spark" )
 		public List<Integer> parallelBlockSize = new ArrayList<Integer>();
 		
+		@Parameter( names = { "--compression", "-c"}, description = "Compression type to use in output N5 dataset" )
+		public String compressionType = "RAW";
+		
 		
 		public boolean init() {
 			if(inputGroupName == null || inputDatasetName == null || factor.size()==0)
@@ -71,13 +74,32 @@ public class SparkDownsampler
 			return;
 		}
 		
+		CompressionType compressionType;
+		switch(params.compressionType) {
+		case "XZ":
+			compressionType = CompressionType.XZ;
+			break;
+		case "LZ4":
+			compressionType = CompressionType.LZ4;
+			break;
+		case "GZIP":
+			compressionType = CompressionType.GZIP;
+			break;
+		case "BZIP2":
+			compressionType = CompressionType.BZIP2;
+			break;
+		case "RAW":
+		default:
+			compressionType = CompressionType.RAW;
+		}
+		
 		SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
 		JavaSparkContext sc = new JavaSparkContext( conf );
 		SparkDownsampler.downsample(sc,
 				new N5FSReader(params.inputGroupName), params.inputGroupName, params.inputDatasetName,
 				params.factor.stream().mapToInt(i->i).toArray(), params.parallelBlockSize.stream().mapToInt(i->i).toArray(),
 				params.outputGroupName, params.outputDatasetName,
-				CompressionType.RAW);
+				compressionType);
 	}
 
 	public static void downsample(JavaSparkContext sc,
