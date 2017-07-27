@@ -40,9 +40,6 @@ public class SparkDownsampler
 		@Parameter( names = { "--parallelblocks", "-pb"}, description = "Size of the blocks (in cells) to parallelize with Spark" )
 		public List<Integer> parallelBlockSize = new ArrayList<Integer>();
 		
-		@Parameter( names = { "--master", "-m"}, description = "Spark master" )
-		public String sparkMaster = "local";
-		
 		
 		public boolean init() {
 			if(inputGroupName == null || inputDatasetName == null || factor.size()==0)
@@ -67,15 +64,14 @@ public class SparkDownsampler
 	
 	public static void main(String[] args) throws IOException {
 		final Parameters params = new Parameters();
-		new JCommander( params, args );
+		JCommander commander = new JCommander( params, args );
 		
 		if(!params.init()) {
-			// show help
-			System.out.println("Incorrect usage");
+			commander.usage();
 			return;
 		}
 		
-		SparkConf conf = new SparkConf().setMaster(params.sparkMaster).setAppName( "SparkDownsampler" );
+		SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
 		JavaSparkContext sc = new JavaSparkContext( conf );
 		SparkDownsampler.downsample(sc,
 				new N5FSReader(params.inputGroupName), params.inputGroupName, params.inputDatasetName,
