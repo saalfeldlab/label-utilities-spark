@@ -2,6 +2,7 @@ package bdv.bigcat.util;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
 
 import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
 import org.janelia.saalfeldlab.n5.CompressionType;
@@ -10,6 +11,9 @@ import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.N5;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
+
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
 
 import bdv.bigcat.label.FragmentSegmentAssignment;
 import bdv.bigcat.ui.GoldenAngleSaturatedARGBStream;
@@ -25,7 +29,6 @@ import bdv.util.Bdv;
 import bdv.util.BdvFunctions;
 import bdv.util.BdvOptions;
 import bdv.util.LocalIdService;
-import bdv.viewer.DisplayMode;
 import ch.systemsx.cisd.hdf5.HDF5Factory;
 import ch.systemsx.cisd.hdf5.IHDF5Reader;
 import net.imglib2.RandomAccessibleInterval;
@@ -43,18 +46,47 @@ import net.imglib2.view.Views;
 
 public class HDFConverter {
 
+	static public class Parameters {
+		
+		@Parameter( names = { "--inputfile", "--input", "-i" }, description = "Input hdf5 file")
+		public String inputHDF5 = null;
+		
+		@Parameter( names = { "--groupname", "--group", "-g" }, description = "Output group name (N5 group)")
+		public String outputGroupName = null;
+		
+		@Parameter( names = { "--datasetname", "--data", "-d" }, description = "Output dataset name (N5 relative path from group)")
+		public String outputDatasetName = null;
+		
+		@Parameter( names = { "--cellsize", "-c"}, description = "Size of cells to use in the output N5 dataset" )
+		public List<Integer> cellSize = Arrays.asList(new Integer[] {64, 64, 8});
+		
+		
+		public boolean init() {
+			if(outputGroupName == null || inputHDF5 == null)
+				return false;
+			return true;
+		}
+	}
+	
 	private static int[] cellDimensions = new int[] {64, 64, 8};
 	private static String groupName = "/home/thistlethwaiten/n5-test/";
 	private static String datasetName = "sample_A_n5";
 
 	public static void main(String[] args) throws IOException {
+		final Parameters params = new Parameters();
+		JCommander jcomm = new JCommander(params, args);
+		
+		if(!params.init()) {
+			jcomm.usage();
+			return;
+		}
 //		sampleConvert();
-		Bdv bdv = sampleDisplay("sampleA", BdvOptions.options());
-		sampleDisplay("sampleA-downscaled-4x4x1", BdvOptions.options().addTo(bdv));
-		sampleDisplay("sampleA-downscaled-8x8x1", BdvOptions.options().addTo(bdv));
-		sampleDisplay("sampleA-downscaled-16x16x2", BdvOptions.options().addTo(bdv));
-		sampleDisplay("sampleA-downscaled-16x16x4", BdvOptions.options().addTo(bdv));
-		bdv.getBdvHandle().getViewerPanel().setDisplayMode(DisplayMode.SINGLE);
+//		Bdv bdv = sampleDisplay("sampleA", BdvOptions.options());
+//		sampleDisplay("sampleA-downscaled-4x4x1", BdvOptions.options().addTo(bdv));
+//		sampleDisplay("sampleA-downscaled-8x8x1", BdvOptions.options().addTo(bdv));
+//		sampleDisplay("sampleA-downscaled-16x16x2", BdvOptions.options().addTo(bdv));
+//		sampleDisplay("sampleA-downscaled-16x16x4", BdvOptions.options().addTo(bdv));
+//		bdv.getBdvHandle().getViewerPanel().setDisplayMode(DisplayMode.SINGLE);
 	}
 	
 	public static Bdv sampleDisplay(String dname, BdvOptions options) throws IOException {
