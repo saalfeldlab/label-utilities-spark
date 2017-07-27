@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
+import org.apache.commons.lang.time.DurationFormatUtils;
 import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
 import org.janelia.saalfeldlab.n5.CompressionType;
 import org.janelia.saalfeldlab.n5.DataType;
@@ -61,7 +62,7 @@ public class HDFConverter {
 		public List<Integer> cellSize = Arrays.asList(new Integer[] {64, 64, 8});
 
 		@Parameter( names = { "--label", "-l" }, description = "Path to labels in HDF5 file" )
-		public String labelpath = "/volumes/labels/neuron_ids";		
+		public String labelPath = "/volumes/labels/neuron_ids";		
 		
 		
 		public boolean init() {
@@ -87,9 +88,18 @@ public class HDFConverter {
 			jcomm.usage();
 			return;
 		}
+		long startTime = System.currentTimeMillis();
+		int[] cellSize = new int[params.cellSize.size()];
+		Arrays.setAll(cellSize, i -> params.cellSize.get(i));
+		convertHDF5toN5(params.inputHDF5, params.labelPath, cellSize, params.outputGroupName, params.outputDatasetName);
+		long endTime = System.currentTimeMillis();
 		
-		convertHDF5toN5("/home/thistlethwaiten/Downloads/sample_A_20160501.hdf", "/volumes/labels/neuron_ids",
-				new int[] {64, 64, 8}, "/home/thistlethwaiten/n5-test/", "sample_A_n5");
+		String formattedTime = DurationFormatUtils.formatDuration(endTime-startTime, "HH:mm:ss.SSS");
+		System.out.println("Converted " + params.inputHDF5 + " to N5 dataset at " + params.outputGroupName + " with name " + params.outputDatasetName +
+				" in " + formattedTime);
+		
+//		convertHDF5toN5("/home/thistlethwaiten/Downloads/sample_A_20160501.hdf", "/volumes/labels/neuron_ids",
+//				new int[] {64, 64, 8}, "/home/thistlethwaiten/n5-test/", "sample_A_n5");
 		
 //		sampleConvert();
 //		Bdv bdv = sampleDisplay("sampleA", BdvOptions.options());
@@ -127,22 +137,17 @@ public class HDFConverter {
 	
 	public static void convertHDF5toN5(String hdf5Path, String labelsPath, int[] cellDimensions, String outputGroupName, String outputDatasetName) throws IOException {
 		
-		IHDF5Reader reader = HDF5Factory.open("/home/thistlethwaiten/Downloads/sample_A_20160501.hdf");
+		IHDF5Reader reader = HDF5Factory.open(hdf5Path);
 		
 		VolatileGlobalCellCache cache = new VolatileGlobalCellCache(1, 6);
-		H5LabelMultisetSetupImageLoader loader = new H5LabelMultisetSetupImageLoader(reader, null, "/volumes/labels/neuron_ids", 0, cellDimensions , cache);
+		H5LabelMultisetSetupImageLoader loader = new H5LabelMultisetSetupImageLoader(reader, null, labelsPath, 0, cellDimensions , cache);
 		
 		RandomAccessibleInterval<LabelMultisetType> img = loader.getImage(0);
 		
 		int nDim = img.numDimensions();
 		
-		System.out.println(String.format("Has %d dimensions", nDim));
-		
 		long[] dimensions = new long[nDim];
 		img.dimensions(dimensions);
-		
-		System.out.println(String.format("Dims are %s", Arrays.toString(dimensions)));
-
 		
 		N5Writer n5 = N5.openFSWriter(outputGroupName);
 		n5.createDataset(outputDatasetName, dimensions, cellDimensions, DataType.UINT8, CompressionType.RAW);
