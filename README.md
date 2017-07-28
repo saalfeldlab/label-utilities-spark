@@ -47,5 +47,7 @@ java -jar target/hdf-n5-converter-0.0.1-SNAPSHOT-jar-with-dependencies.jar --inp
 Would write an N5 dataset at `~/n5/sampleA-fullres` from the labels at `/volumes/labels/neuron_ids` in `~/sample_A_20160501.hdf` with GZIP compression (recommended).
 
 
+---
+
 
 **NOTE:** This currently requires [`LabelUtils`](https://github.com/shrucis1/bigcat/blob/85c26f718cae97a133e279f3f3ec1e3ab7eaa73d/src/main/java/bdv/labels/labelset/LabelUtils.java) from the `n5cacheloader2` branch of BIGCAT, which currently is not merged into `master`. To compile this project from source, you must check out that branch and maven install it so that it has the necessary functionality.
