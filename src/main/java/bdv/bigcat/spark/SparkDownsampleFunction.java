@@ -12,8 +12,10 @@ import org.janelia.saalfeldlab.n5.N5Writer;
 
 import bdv.labels.labelset.LabelMultisetType;
 import bdv.labels.labelset.LabelMultisetTypeDownscaler;
+import bdv.labels.labelset.LabelUtils;
 import bdv.labels.labelset.N5CacheLoader;
 import bdv.labels.labelset.VolatileLabelMultisetArray;
+import net.imglib2.RandomAccessible;
 import net.imglib2.cache.CacheLoader;
 import net.imglib2.cache.img.CachedCellImg;
 import net.imglib2.cache.ref.BoundedSoftRefLoaderCache;
@@ -42,6 +44,8 @@ public class SparkDownsampleFunction implements Function<DownsampleBlock, Intege
 	@Override
 	public Integer call(DownsampleBlock targetRegion) throws Exception {
 		
+		System.out.println("Called with downsamp block " + targetRegion);
+
 		N5Reader reader = new N5FSReader(inputGroupName);
 		DatasetAttributes attr = reader.getDatasetAttributes(inputDatasetName);
 		
@@ -66,6 +70,8 @@ public class SparkDownsampleFunction implements Function<DownsampleBlock, Intege
 		final CachedCellImg<LabelMultisetType,VolatileLabelMultisetArray> inputImg = new CachedCellImg<LabelMultisetType,VolatileLabelMultisetArray>(
 				new CellGrid(dimensions, blocksize), new LabelMultisetType(), wrappedCache, new VolatileLabelMultisetArray(0, true));
 		
+		final RandomAccessible<LabelMultisetType> extendedImg = Views.extendValue(inputImg, LabelUtils.getOutOfBounds());
+		
 		VolatileLabelMultisetArray downscaledCell;
 		
 		int numCellsDownscaled = 0;
@@ -78,11 +84,14 @@ public class SparkDownsampleFunction implements Function<DownsampleBlock, Intege
 		for(int d = 0; d < nDim; ) {
 			
 			Arrays.setAll(actualLocation, i -> factor[i] * (targetMin[i] + offset[i]));
-			Arrays.setAll(actualSize, i -> Math.min(
-					factor[i] * (offset[i] + blocksize[i] > targetMin[i] + targetSize[i] ? (targetMin[i] + targetSize[i] - offset[i]) : blocksize[i]),
-					dimensions[i] - actualLocation[i]));
-						
-			downscaledCell = LabelMultisetTypeDownscaler.createDownscaledCell(Views.offsetInterval(inputImg, actualLocation, actualSize), factor);
+			Arrays.setAll(actualSize, i -> factor[i] * blocksize[i]);
+			
+//			Arrays.setAll(actualSize, i -> Math.min(
+//					factor[i] * (offset[i] + blocksize[i] > targetMin[i] + targetSize[i] ? (targetMin[i] + targetSize[i] - offset[i]) : blocksize[i]),
+//					dimensions[i] - actualLocation[i]));
+
+//			downscaledCell = LabelMultisetTypeDownscaler.createDownscaledCell(Views.offsetInterval(inputImg, actualLocation, actualSize), factor);
+			downscaledCell = LabelMultisetTypeDownscaler.createDownscaledCell(Views.offsetInterval(extendedImg, actualLocation, actualSize), factor);
 			
 			byte[] bytes = new byte[LabelMultisetTypeDownscaler.getSerializedVolatileLabelMultisetArraySize(downscaledCell)];
 			LabelMultisetTypeDownscaler.serializeVolatileLabelMultisetArray(downscaledCell, bytes);
