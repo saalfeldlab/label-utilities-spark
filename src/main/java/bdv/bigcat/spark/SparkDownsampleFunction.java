@@ -26,7 +26,7 @@ import net.imglib2.view.Views;
 
 public class SparkDownsampleFunction implements Function<DownsampleBlock, Integer> {
 	
-	private static final long serialVersionUID = 1384028449836651388L;
+	private static final long serialVersionUID = 1384028449836651389L;
 	private final String inputGroupName;
 	private final String inputDatasetName;
 	private final int[] factor;
@@ -43,20 +43,18 @@ public class SparkDownsampleFunction implements Function<DownsampleBlock, Intege
 
 	@Override
 	public Integer call(DownsampleBlock targetRegion) throws Exception {
-		
-		System.out.println("Called with downsamp block " + targetRegion);
 
-		N5Reader reader = new N5FSReader(inputGroupName);
-		DatasetAttributes attr = reader.getDatasetAttributes(inputDatasetName);
+		final N5Reader reader = new N5FSReader(inputGroupName);
+		final DatasetAttributes attr = reader.getDatasetAttributes(inputDatasetName);
 		
-		long[] dimensions = attr.getDimensions();
-		int[] blocksize = attr.getBlockSize();
+		final long[] dimensions = attr.getDimensions();
+		final int[] blocksize = attr.getBlockSize();
 		
-		int nDim = dimensions.length;
+		final int nDim = dimensions.length;
 		final long[] offset = new long[nDim];
 		
-		int[] targetSize = targetRegion.getSize();
-		long[] targetMin = targetRegion.getMin();
+		final int[] targetSize = targetRegion.getSize();
+		final long[] targetMin = targetRegion.getMin();
 		
 		long[] actualLocation = new long[nDim];
 		long[] actualSize = new long[nDim];
@@ -85,12 +83,7 @@ public class SparkDownsampleFunction implements Function<DownsampleBlock, Intege
 			
 			Arrays.setAll(actualLocation, i -> factor[i] * (targetMin[i] + offset[i]));
 			Arrays.setAll(actualSize, i -> factor[i] * blocksize[i]);
-			
-//			Arrays.setAll(actualSize, i -> Math.min(
-//					factor[i] * (offset[i] + blocksize[i] > targetMin[i] + targetSize[i] ? (targetMin[i] + targetSize[i] - offset[i]) : blocksize[i]),
-//					dimensions[i] - actualLocation[i]));
 
-//			downscaledCell = LabelMultisetTypeDownscaler.createDownscaledCell(Views.offsetInterval(inputImg, actualLocation, actualSize), factor);
 			downscaledCell = LabelMultisetTypeDownscaler.createDownscaledCell(Views.offsetInterval(extendedImg, actualLocation, actualSize), factor);
 			
 			byte[] bytes = new byte[LabelMultisetTypeDownscaler.getSerializedVolatileLabelMultisetArraySize(downscaledCell)];

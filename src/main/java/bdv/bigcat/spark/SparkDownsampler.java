@@ -106,7 +106,7 @@ public class SparkDownsampler
 		
 		for(int d = 0; d < nDim; ) {
 			
-			for(int i = 0; i < nDim; i ++) // go up to nearest cellsize,
+			for(int i = 0; i < nDim; i ++)
 				actualSize[i] = Math.min(parallelSize[i]*blockSize[i], blockSize[i] * (int)Math.ceil((downsampledDimensions[i]-offset[i])/(double)blockSize[i]));
 
 			parallelizeSections.add(new DownsampleBlock(offset.clone(), actualSize.clone()));
@@ -127,6 +127,6 @@ public class SparkDownsampler
 			.map( new SparkDownsampleFunction(readGroupName, readDatasetName, downsampleFactor, outputGroupName, outputDatasetName))
 			.reduce( (i,j) -> i+j);
 		
-		System.out.println("output is " + output);
+		System.out.println("Across " + parallelizeSections.size() + " parallelized sections, " + output + " cells were downscaled");
 	}
 }
