@@ -82,7 +82,11 @@ public class SparkDownsampleFunction implements Function<DownsampleBlock, Intege
 		for(int d = 0; d < nDim; ) {
 			
 			Arrays.setAll(actualLocation, i -> factor[i] * (targetMin[i] + offset[i]));
-			Arrays.setAll(actualSize, i -> factor[i] * blocksize[i]);
+
+			// TODO: figure out what part of this is redundant, if any, and clarify it
+			Arrays.setAll(actualSize, i -> Math.min(
+ 					factor[i] * (offset[i] + blocksize[i] > targetMin[i] + targetSize[i] ? (targetMin[i] + targetSize[i] - offset[i]) : blocksize[i]),
+ 					factor[i] * (int)Math.ceil( (dimensions[i] - actualLocation[i]) / (double)factor[i] ) ));
 
 			downscaledCell = LabelMultisetTypeDownscaler.createDownscaledCell(Views.offsetInterval(extendedImg, actualLocation, actualSize), factor);
 			
