@@ -55,3 +55,36 @@ lose information other than where within a downsampled block each label is.
 When converting to a color for visualization purposes, this method also
 allows a weighted color to be calculated from the colors of each label within
 a downsampled pixel.
+
+## Usage
+
+```
+java -jar target/bigcat-spark-downsampler-0.0.1-SNAPSHOT-jar-with-dependencies.jar [args]
+```
+
+#### Arguments
+
+-  `--compression`, `-c`
+   Compression type to use in output N5 dataset. Default: `RAW`
+   
+-  `--factor`, `-f`
+   Factor by which to downscale the input image
+   (**Required**)
+   
+-  `--idatasetname`, `--idata`, `-id`
+   Input dataset name (N5 relative path from group)
+   (**Required**)
+   
+-  `--igroupname`, `--igroup`, `-ig`
+   Input group name (N5 group)
+   (**Required**)
+   
+-  `--odatasetname`, `--odata`, `-od`
+   Output dataset name (N5 relative path from group)
+   (**Required**)
+   
+-  `--ogroupname`, `--ogroup`, `-og`
+   Output group name (N5 group). Defaults to input group name
+   
+-  `--parallelblocks`, `-pb`
+   Size of the blocks (in cells) to parallelize with Spark. Defaults to [16, 16, ... 16]
