@@ -34,3 +34,24 @@ mvn clean install
 ```
 mvn clean compile assembly:single
 ```
+
+## Downsampling
+
+![Downsampling Operation](/img/downsampling_example.png)
+
+<img align="right" src="/img/labelmultiset_structure.png" height=175 />
+
+Downsampling works by merging groups of `LabelMultisetEntryList`'s:
+
+For instance, in a block of pixels where each list has one entry,
+with a count of 1 and a label of either 83 or 64, they will be downsampled
+into a single list with 2 entries, one of which will have a label of 83
+and the corresponding count, and the other will have a label of 64 and its
+corresponding count.
+
+The motivation for this method of downsampling is that it doesn't technically
+lose information other than where within a downsampled block each label is.
+
+When converting to a color for visualization purposes, this method also
+allows a weighted color to be calculated from the colors of each label within
+a downsampled pixel.
