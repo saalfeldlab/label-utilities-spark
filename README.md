@@ -1,5 +1,5 @@
 # HDF to N5 Converter
-Command-line converter tool for turning labeled HDF5 data into an [N5](https://github.com/saalfeldlab/n5) label dataset of arbitrary cell size, which allows for parallel writing. In the future, this will probably be how [BIGCAT](https://github.com/saalfeldlab/bigcat) will allow collaborative editing of labels.
+Command-line converter tool for turning labeled HDF5 data into an [N5](https://github.com/saalfeldlab/n5) label dataset of arbitrary cell size, which allows for parallel writing. In the future, [BigCAT](https://github.com/saalfeldlab/bigcat) will probably use N5 as the backend for label data.
 
 ## Compile
 
