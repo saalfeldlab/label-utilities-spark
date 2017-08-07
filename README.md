@@ -59,7 +59,7 @@ a downsampled pixel.
 ## Usage
 
 ```
-java -jar target/bigcat-spark-downsampler-0.0.1-SNAPSHOT-jar-with-dependencies.jar [args]
+java -Dspark.master=[spark_master] -jar target/bigcat-spark-downsampler-0.0.1-SNAPSHOT-jar-with-dependencies.jar [args]
 ```
 
 #### Arguments
@@ -88,3 +88,20 @@ java -jar target/bigcat-spark-downsampler-0.0.1-SNAPSHOT-jar-with-dependencies.j
    
 -  `--parallelblocks`, `-pb`
    Size of the blocks (in cells) to parallelize with Spark. Defaults to [16, 16, ... 16]
+
+Note that the `spark.master` property must be set when running as well. See [here](http://spark.apache.org/docs/latest/submitting-applications.html#master-urls) for more information on Spark Master URLs.
+
+#### Example
+
+```
+java -Dspark.master=local[*] -jar target/bigcat-spark-downsampler-0.0.1-SNAPSHOT-jar-with-dependencies.jar -ig ~/cremi-n5/ -id sampleA-fullres -od sampleA-8x8x2 -f 8,8,2 -c GZIP -pb 4,4,4
+```
+
+Would downsample the N5 label dataset at `~/cremi-n5/sampleA-fulres` by a factor of 8x8x2, and write to an N5 dataset (with GZIP compression) at `~/cremi-n5/sampleA-8x8x2`.
+
+Note that the output group name is not specified, and defaults to the same as the input group name.
+
+Also, `spark.master` is set to `local[*]`, which, according to [Spark documentation](http://spark.apache.org/docs/latest/submitting-applications.html#master-urls), will
+> Run Spark locally with as many worker threads as logical cores on your machine.
+
+Parallel block size simply determines the size of each block to parallelize with, 4x4x4 yields blocks of 64 cells each. This will have no impact on the output dataset, but if it is set too high relative to the input dataset, there may not be enough blocks for each worker thread to have something to work on (thus wasting the parallelism).
