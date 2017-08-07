@@ -10,9 +10,11 @@ import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 
+import bdv.labels.labelset.Label;
 import bdv.labels.labelset.LabelMultisetType;
 import bdv.labels.labelset.LabelMultisetTypeDownscaler;
 import bdv.labels.labelset.LabelUtils;
+import bdv.labels.labelset.Multiset.Entry;
 import bdv.labels.labelset.N5CacheLoader;
 import bdv.labels.labelset.VolatileLabelMultisetArray;
 import net.imglib2.RandomAccessible;
@@ -26,7 +28,7 @@ import net.imglib2.view.Views;
 
 public class SparkDownsampleFunction implements Function<DownsampleBlock, Integer> {
 	
-	private static final long serialVersionUID = 1384028449836651389L;
+	private static final long serialVersionUID = 1384028449836651390L;
 	private final String inputGroupName;
 	private final String inputDatasetName;
 	private final int[] factor;
@@ -68,7 +70,11 @@ public class SparkDownsampleFunction implements Function<DownsampleBlock, Intege
 		final CachedCellImg<LabelMultisetType,VolatileLabelMultisetArray> inputImg = new CachedCellImg<LabelMultisetType,VolatileLabelMultisetArray>(
 				new CellGrid(dimensions, blocksize), new LabelMultisetType(), wrappedCache, new VolatileLabelMultisetArray(0, true));
 		
-		final RandomAccessible<LabelMultisetType> extendedImg = Views.extendValue(inputImg, LabelUtils.getOutOfBounds());
+		int eachCount = 0;
+		for(Entry<Label> e : inputImg.firstElement().entrySet())
+			eachCount += e.getCount();
+		
+		final RandomAccessible<LabelMultisetType> extendedImg = Views.extendValue(inputImg, LabelUtils.getOutOfBounds(eachCount));
 		
 		VolatileLabelMultisetArray downscaledCell;
 		
