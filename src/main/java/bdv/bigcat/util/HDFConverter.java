@@ -20,12 +20,12 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.google.gson.Gson;
 
-import net.imglib.type.label.FromIntegerTypeConverter;
-import net.imglib.type.label.LabelMultisetType;
-import net.imglib.type.label.LabelUtils;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.converter.Converters;
 import net.imglib2.type.NativeType;
+import net.imglib2.type.label.FromIntegerTypeConverter;
+import net.imglib2.type.label.LabelMultisetType;
+import net.imglib2.type.label.LabelUtils;
 import net.imglib2.type.numeric.IntegerType;
 import net.imglib2.util.Intervals;
 import net.imglib2.view.IntervalView;
