@@ -10,13 +10,6 @@ import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 
-import net.imglib.type.label.Label;
-import net.imglib.type.label.LabelMultisetType;
-import net.imglib.type.label.LabelMultisetTypeDownscaler;
-import net.imglib.type.label.LabelUtils;
-import net.imglib.type.label.Multiset.Entry;
-import net.imglib.type.label.N5CacheLoader;
-import net.imglib.type.label.VolatileLabelMultisetArray;
 import net.imglib2.RandomAccessible;
 import net.imglib2.cache.CacheLoader;
 import net.imglib2.cache.img.CachedCellImg;
@@ -24,6 +17,13 @@ import net.imglib2.cache.ref.BoundedSoftRefLoaderCache;
 import net.imglib2.cache.util.LoaderCacheAsCacheAdapter;
 import net.imglib2.img.cell.Cell;
 import net.imglib2.img.cell.CellGrid;
+import net.imglib2.type.label.Label;
+import net.imglib2.type.label.LabelMultisetType;
+import net.imglib2.type.label.LabelMultisetTypeDownscaler;
+import net.imglib2.type.label.LabelUtils;
+import net.imglib2.type.label.N5CacheLoader;
+import net.imglib2.type.label.VolatileLabelMultisetArray;
+import net.imglib2.type.label.Multiset.Entry;
 import net.imglib2.view.Views;
 
 public class SparkDownsampleFunction implements Function< DownsampleBlock, Integer >
