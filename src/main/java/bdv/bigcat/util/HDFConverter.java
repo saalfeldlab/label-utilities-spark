@@ -84,12 +84,6 @@ public class HDFConverter
 
 		final N5FSReader reader = new N5FSReader( params.outputGroupName );
 		final Gson gson = reader.getGson();
-		new N5FSWriter( "/home/phil/local/tmp/123" ).createDataset(
-				"456",
-				new long[] { 1 },
-				new int[] { 1 },
-				DataType.UINT8,
-				new GzipCompression() );
 		final Compression compression = gson.fromJson( params.compressionType, Compression.class );
 
 		convertHDF5toN5(
