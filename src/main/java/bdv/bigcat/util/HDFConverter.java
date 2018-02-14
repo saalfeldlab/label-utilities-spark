@@ -9,7 +9,6 @@ import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
 import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.N5FSReader;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Writer;
@@ -33,6 +32,8 @@ import net.imglib2.view.Views;
 
 public class HDFConverter
 {
+
+	public static String LABEL_MULTISETTYPE_KEY = "isLabelMultiset";
 
 	// TODO make this parallizable/spark and not hdf-to-n5 but convert between
 	// various instances of n5 instead
@@ -119,6 +120,7 @@ public class HDFConverter
 
 		final N5Writer n5 = new N5FSWriter( outputGroupName );
 		n5.createDataset( outputDatasetName, dimensions, cellDimensions, DataType.UINT8, compression );
+		n5.setAttribute( outputDatasetName, LABEL_MULTISETTYPE_KEY, true );
 
 		final long[] offset = new long[ nDim ];
 
