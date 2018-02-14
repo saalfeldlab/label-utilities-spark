@@ -47,9 +47,7 @@ corresponding count.
 The motivation for this method of downsampling is that it doesn't technically
 lose information other than where within a downsampled block each label is.
 
-When converting to a color for visualization purposes, this method also
-allows a weighted color to be calculated from the colors of each label within
-a downsampled pixel.
+Most importantly, for sparse labels, this allows to query lists of blocks that contain a specific label id very efficiently. This is very useful for on the fly 3D mesh generation via marching cubes. Also, when converting to a color for visualization purposes, the transition between scale levels when rendering arbitrary 2D slices gets smoother as individual pixels can be assigned colors based on the weighted sums of the contained labels.
 
 ## Usage
 
