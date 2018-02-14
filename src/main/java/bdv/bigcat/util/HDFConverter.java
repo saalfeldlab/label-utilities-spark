@@ -33,7 +33,7 @@ import net.imglib2.view.Views;
 public class HDFConverter
 {
 
-	public static String LABEL_MULTISETTYPE_KEY = "isLabelMultiset";
+	public static final String LABEL_MULTISETTYPE_KEY = "isLabelMultiset";
 
 	// TODO make this parallizable/spark and not hdf-to-n5 but convert between
 	// various instances of n5 instead
