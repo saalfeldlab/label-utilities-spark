@@ -53,7 +53,13 @@ a downsampled pixel.
 
 ## Usage
 
-Run `[SPARK_MASTER=<master>] [JAR=<jar>] ./multisets-downsampler <args>` (bash or compatible shell reuqired). Square brackets indicate optional arguments. If no bash or compatible shell is available, copy and modify the contents of `multisets-downsampler` as required.
+Run `[SPARK_MASTER=<master>] [JAR=<jar>] ./multisets-downsampler <args>` (bash or compatible shell reuqired). Square brackets indicate optional arguments. If no bash or compatible shell is available, copy and modify the contents of `multisets-downsampler` as required. This script will invoke the main class `bdv.bigcat.spark.SparkDownsampler`:
+```bash
+java -cp "${JAR}" \
+     -Dspark.master="${SPARK_MASTER}" \
+     bdv.bigcat.spark.SparkDownsampler \
+     $@
+```
 
 #### Positional Arguments
 - List of downsampling factors per scale level, separated by spaces. Each factor is relatitve to the previous scale level. Factors can should adhere to the format `fX,fY,fZ` for anisotropic downsampling, or simply `f` for isotropic downsampling.
