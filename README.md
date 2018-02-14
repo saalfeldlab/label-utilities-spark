@@ -3,36 +3,31 @@ Command-line tool for downsampling label data (stored as LabelMultisetTypes in a
 
 ## Compile
 
-Because this repository uses a branch of [BigCAT](https://github.com/shrucis1/bigcat) that is not currently merged into master, to compile from source you will first have to check out that branch (which requires the latest version of N5, which also needs to be compiled).
+First install SNAPSHOT dependencies that are not available through remote maven repositories:
 
- - Clone [N5](https://github.com/saalfeldlab/n5) to any location
-
- - Use Maven to install N5 1.1.4-SNAPSHOT into your local repository
-
+ - Clone [imglib2-cache](https://github.com/imglib/imglib2-cache): `git clone https://github.com/imglib/imglib2-cache`
+ - Install
 ```
 mvn clean install
 ```
-
- - Then, clone `shrucis1/bigcat` to a location of your choice.
-
- - Switch to the `n5cacheloader` branch with the necessary changes.
-
-```
-git checkout n5cacheloader
-```
-
- - Use Maven to install this branch of BigCAT into your local repository
-
+ - Clone [label-multisets](https://github.com/hanslovsky/label-multisets): `git clone https://github.com/hanslovsky/label-multisets`
+ - Install
 ```
 mvn clean install
 ```
-
+ - Clone [n5-label-multisets](https://github.com/hanslovsky/n5-label-multisets): `git clone https://github.com/hanslovsky/n5-label-multisets`
+ - Install
+```
+mvn clean install
+```
  - Finally, clone this repository, and it should compile.
-
- - To make a "fat jar" with all dependencies added, run:
-
+ - To make a "shaded jar" with all dependencies added (local jobs), run:
 ```
-mvn clean compile assembly:single
+mvn -PfatWithSpark -Denforcer.skip=true clean package
+```
+ - To make a "shaded jar" with all dependencies except Spark added (cluster jobs), run:
+```
+mvn -Pfat -Denforcer.skip=true clean package
 ```
 
 ## Downsampling
@@ -58,50 +53,29 @@ a downsampled pixel.
 
 ## Usage
 
-```
-java -Dspark.master=[spark_master] -jar target/bigcat-spark-downsampler-0.0.1-SNAPSHOT-jar-with-dependencies.jar [args]
-```
+Run `[SPARK_MASTER=<master>] [JAR=<jar>] ./multisets-downsampler <args>` (bash or compatible shell reuqired). Square brackets indicate optional arguments. If no bash or compatible shell is available, copy and modify the contents of `multisets-downsampler` as required.
 
-#### Arguments
+#### Positional Arguments
+- List of downsampling factors per scale level, separated by spaces. Each factor is relatitve to the previous scale level. Factors can should adhere to the format `fX,fY,fZ` for anisotropic downsampling, or simply `f` for isotropic downsampling.
+
+#### Options
+
+- `--block-size`, `-b`
+   Chunk size of the target n5 dataset. Downsampling will be parallelized over these blocks. This is optional, for any scale level for which no block size is defined, this defaults to the block size of the previous scale level. Block sizes should adhere to the format `bX,bY,bZ` for anisotropic block sizes, or simply `b` for isotropic block sizes. If no block size is defined at all, this defaults to `64`.
 
 -  `--compression`, `-c`
-   Compression type to use in output N5 dataset. Default: `RAW`
+   Compression type to use in output N5 dataset. *Default*: `{\"type\":\"raw\"}`
    
--  `--factor`, `-f`
-   Factor by which to downscale the input image
-   (**Required**)
+-  `--dataset`, `-d`
+   Multiscale dataset. The first scale level at `dataset/s0` is required to be present unless `-l`/`--link-mipmap-level-zero` is specified.
    
--  `--idatasetname`, `--idata`, `-id`
-   Input dataset name (N5 relative path from group)
-   (**Required**)
+-  `--group`, `--g`
+   N5 root
    
--  `--igroupname`, `--igroup`, `-ig`
-   Input group name (N5 group)
-   (**Required**)
+-  `-l`, `--link-mipmap-level-zero`
+   Create the first scale level as symlink
    
--  `--odatasetname`, `--odata`, `-od`
-   Output dataset name (N5 relative path from group)
-   (**Required**)
+-  `--help`, `--h`
+   Show help/usage
    
--  `--ogroupname`, `--ogroup`, `-og`
-   Output group name (N5 group). Defaults to input group name
-   
--  `--parallelblocks`, `-pb`
-   Size of the blocks (in cells) to parallelize with Spark. Defaults to [16, 16, ... 16]
-
 Note that the `spark.master` property must be set when running as well. See [here](http://spark.apache.org/docs/latest/submitting-applications.html#master-urls) for more information on Spark Master URLs.
-
-#### Example
-
-```
-java -Dspark.master=local[*] -jar target/bigcat-spark-downsampler-0.0.1-SNAPSHOT-jar-with-dependencies.jar -ig ~/cremi-n5/ -id sampleA-fullres -od sampleA-8x8x2 -f 8,8,2 -c GZIP -pb 4,4,4
-```
-
-Would downsample the N5 label dataset at `~/cremi-n5/sampleA-fulres` by a factor of 8x8x2, and write to an N5 dataset (with GZIP compression) at `~/cremi-n5/sampleA-8x8x2`.
-
-Note that the output group name is not specified, and defaults to the same as the input group name.
-
-Also, `spark.master` is set to `local[*]`, which, according to [Spark documentation](http://spark.apache.org/docs/latest/submitting-applications.html#master-urls), will
-> Run Spark locally with as many worker threads as logical cores on your machine.
-
-Parallel block size simply determines the size of each block to parallelize with, 4x4x4 yields blocks of 64 cells each. This will have no impact on the output dataset, but if it is set too high relative to the input dataset, there may not be enough blocks for each worker thread to have something to work on (thus wasting the parallelism).
