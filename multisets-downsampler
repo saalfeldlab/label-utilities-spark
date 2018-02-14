@@ -8,8 +8,9 @@
 # http://picocli.info/autocomplete.html
 
 SPARK_MASTER="${SPARK_MASTER:-local[*]}"
+JAR=${JAR:-target/bigcat-spark-downsampler-0.0.1-SNAPSHOT-shaded.jar}
 
-java -cp target/bigcat-spark-downsampler-0.0.1-SNAPSHOT-shaded.jar \
+java -cp "${JAR}" \
      -Dspark.master="${SPARK_MASTER}" \
      bdv.bigcat.spark.SparkDownsampler \
      $@
