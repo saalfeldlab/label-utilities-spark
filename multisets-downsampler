@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# compile like this:
+# mvn -PfatWithSpark -Denforcer.skip=true clean package
+
+# auto complete generation:
+# java -cp "/path/to/picocli.jar:bigcat-spark-downsampler.jar" picocli.AutoComplete -n <name> bdv.bigcat.spark.SparkDownsampler
+# http://picocli.info/autocomplete.html
+
+SPARK_MASTER="${SPARK_MASTER:-local[*]}"
+
+java -cp target/bigcat-spark-downsampler-0.0.1-SNAPSHOT-shaded.jar \
+     -Dspark.master="${SPARK_MASTER}" \
+     bdv.bigcat.spark.SparkDownsampler \
+     $@
+     # -g /home/phil/local/tmp/n5 \
+     # -d labels-mipmap \
+     # 2,2,1 2,2,1 2,2,1 2,2,2
