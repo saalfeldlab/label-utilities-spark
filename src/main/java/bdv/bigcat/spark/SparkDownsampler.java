@@ -152,9 +152,10 @@ public class SparkDownsampler
 		final DatasetAttributes attributes = reader.getDatasetAttributes( readDatasetName );
 
 		final long[] dimensions = attributes.getDimensions();
+		final long[] max = Arrays.stream( dimensions ).map( dim -> dim - 1 ).toArray();
 		final int[] blockSize = attributes.getBlockSize();
 
-		final List< DownsampleBlock > parallelizeSections = new ArrayList<>();
+		final List< long[] > positions = new ArrayList<>();
 
 		final int nDim = attributes.getNumDimensions();
 
@@ -171,7 +172,7 @@ public class SparkDownsampler
 			for ( int i = 0; i < nDim; i++ )
 				actualSize[ i ] = ( int ) Math.min( parallelSize[ i ] * blockSize[ i ], downsampledDimensions[ i ] - offset[ i ] );
 
-			parallelizeSections.add( new DownsampleBlock( offset.clone(), actualSize.clone() ) );
+			positions.add( offset.clone() );
 
 			for ( d = 0; d < nDim; d++ )
 			{
@@ -191,11 +192,11 @@ public class SparkDownsampler
 		writer.createDataset( outputDatasetName, downsampledDimensions, blockSize, DataType.UINT8, compression );
 		writer.setAttribute( outputDatasetName, DOWNSAMPLING_FACTORS_KEY, accumulatedDownsamplingFactor );
 
-		final Integer output = sc.parallelize( parallelizeSections )
-				.map( new SparkDownsampleFunction( readGroupName, readDatasetName, downsampleFactor, outputGroupName, outputDatasetName ) )
-				.reduce( ( i, j ) -> i + j );
+		sc.parallelize( positions )
+				.map( new MinToInterval( max, blockSize ) )
+				.foreach( new SparkDownsampleFunction( readGroupName, readDatasetName, downsampleFactor, outputGroupName, outputDatasetName ) );
 
-		System.out.println( "Across " + parallelizeSections.size() + " parallelized sections, " + output + " cells were downscaled" );
+//		System.out.println( "Across " + positions.size() + " parallelized sections, " + output + " cells were downscaled" );
 	}
 
 	public static int[] toIntegerArray( final String str )

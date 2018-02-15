@@ -2,7 +2,7 @@ package bdv.bigcat.spark;
 
 import java.util.Arrays;
 
-import org.apache.spark.api.java.function.Function;
+import org.apache.spark.api.java.function.VoidFunction;
 import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.N5FSReader;
@@ -10,10 +10,11 @@ import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 
+import net.imglib2.Interval;
 import net.imglib2.RandomAccessible;
 import net.imglib2.cache.CacheLoader;
 import net.imglib2.cache.img.CachedCellImg;
-import net.imglib2.cache.ref.BoundedSoftRefLoaderCache;
+import net.imglib2.cache.ref.SoftRefLoaderCache;
 import net.imglib2.cache.util.LoaderCacheAsCacheAdapter;
 import net.imglib2.img.cell.Cell;
 import net.imglib2.img.cell.CellGrid;
@@ -21,12 +22,13 @@ import net.imglib2.type.label.Label;
 import net.imglib2.type.label.LabelMultisetType;
 import net.imglib2.type.label.LabelMultisetTypeDownscaler;
 import net.imglib2.type.label.LabelUtils;
+import net.imglib2.type.label.Multiset.Entry;
 import net.imglib2.type.label.N5CacheLoader;
 import net.imglib2.type.label.VolatileLabelMultisetArray;
-import net.imglib2.type.label.Multiset.Entry;
+import net.imglib2.util.Intervals;
 import net.imglib2.view.Views;
 
-public class SparkDownsampleFunction implements Function< DownsampleBlock, Integer >
+public class SparkDownsampleFunction implements VoidFunction< Interval >
 {
 
 	private static final long serialVersionUID = 1384028449836651390L;
@@ -41,7 +43,12 @@ public class SparkDownsampleFunction implements Function< DownsampleBlock, Integ
 
 	private final String outputDatasetName;
 
-	public SparkDownsampleFunction( final String inputGroupName, final String inputDatasetName, final int[] factor, final String outputGroupName, final String outputDatasetName )
+	public SparkDownsampleFunction(
+			final String inputGroupName,
+			final String inputDatasetName,
+			final int[] factor,
+			final String outputGroupName,
+			final String outputDatasetName )
 	{
 		this.inputGroupName = inputGroupName;
 		this.inputDatasetName = inputDatasetName;
@@ -51,7 +58,7 @@ public class SparkDownsampleFunction implements Function< DownsampleBlock, Integ
 	}
 
 	@Override
-	public Integer call( final DownsampleBlock targetRegion ) throws Exception
+	public void call( final Interval interval ) throws Exception
 	{
 
 		final N5Reader reader = new N5FSReader( inputGroupName );
@@ -63,15 +70,16 @@ public class SparkDownsampleFunction implements Function< DownsampleBlock, Integ
 		final int nDim = dimensions.length;
 		final long[] offset = new long[ nDim ];
 
-		final int[] targetSize = targetRegion.getSize();
-		final long[] targetMin = targetRegion.getMin();
+		final int[] targetSize = Intervals.dimensionsAsIntArray( interval );
+		final long[] targetMin = Intervals.minAsLongArray( interval );
 
 		final long[] actualLocation = new long[ nDim ];
 		final long[] actualSize = new long[ nDim ];
 
 		final CacheLoader< Long, Cell< VolatileLabelMultisetArray > > cacheLoader = new N5CacheLoader( reader, inputDatasetName );
 
-		final BoundedSoftRefLoaderCache< Long, Cell< VolatileLabelMultisetArray > > cache = new BoundedSoftRefLoaderCache<>( 1 );
+//		final BoundedSoftRefLoaderCache< Long, Cell< VolatileLabelMultisetArray > > cache = new BoundedSoftRefLoaderCache<>( 1 );
+		final SoftRefLoaderCache< Long, Cell< VolatileLabelMultisetArray > > cache = new SoftRefLoaderCache<>();
 		final LoaderCacheAsCacheAdapter< Long, Cell< VolatileLabelMultisetArray > > wrappedCache = new LoaderCacheAsCacheAdapter<>( cache, cacheLoader );
 
 		final CachedCellImg< LabelMultisetType, VolatileLabelMultisetArray > inputImg = new CachedCellImg<>(
@@ -126,6 +134,5 @@ public class SparkDownsampleFunction implements Function< DownsampleBlock, Integ
 			}
 		}
 
-		return numCellsDownscaled;
 	}
 }
