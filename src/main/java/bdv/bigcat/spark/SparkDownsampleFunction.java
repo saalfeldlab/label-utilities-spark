@@ -12,6 +12,7 @@ import org.janelia.saalfeldlab.n5.N5Writer;
 
 import net.imglib2.Interval;
 import net.imglib2.RandomAccessible;
+import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.cache.CacheLoader;
 import net.imglib2.cache.img.CachedCellImg;
 import net.imglib2.cache.ref.SoftRefLoaderCache;
@@ -26,6 +27,7 @@ import net.imglib2.type.label.Multiset.Entry;
 import net.imglib2.type.label.N5CacheLoader;
 import net.imglib2.type.label.VolatileLabelMultisetArray;
 import net.imglib2.util.Intervals;
+import net.imglib2.util.Util;
 import net.imglib2.view.Views;
 
 public class SparkDownsampleFunction implements VoidFunction< Interval >
@@ -64,75 +66,59 @@ public class SparkDownsampleFunction implements VoidFunction< Interval >
 		final N5Reader reader = new N5FSReader( inputGroupName );
 		final DatasetAttributes attr = reader.getDatasetAttributes( inputDatasetName );
 
-		final long[] dimensions = attr.getDimensions();
-		final int[] blocksize = attr.getBlockSize();
+		final long[] sourceDimensions = attr.getDimensions();
+		final int[] sourceBlockSize = attr.getBlockSize();
+		final int nDim = attr.getNumDimensions();
 
-		final int nDim = dimensions.length;
-		final long[] offset = new long[ nDim ];
+		final long[] blockMinInTarget = Intervals.minAsLongArray( interval );
+		final int[] blockSizeInTarget = Intervals.dimensionsAsIntArray( interval );
 
-		final int[] targetSize = Intervals.dimensionsAsIntArray( interval );
-		final long[] targetMin = Intervals.minAsLongArray( interval );
+		final long[] blockMinInSource = new long[ nDim ];
+		final long[] blockMaxInSource = new long[ nDim ];
+		final long[] blockSizeInSource = new long[ nDim ];
+		Arrays.setAll( blockMinInSource, i -> factor[ i ] * blockMinInTarget[ i ] );
+		Arrays.setAll( blockMaxInSource, i -> Math.min( blockMinInSource[ i ] + factor[ i ] * blockSizeInTarget[ i ] - 1, sourceDimensions[ i ] - 1 ) );
+		Arrays.setAll( blockSizeInSource, i -> blockMaxInSource[ i ] - blockMinInSource[ i ] + 1 );
 
-		final long[] actualLocation = new long[ nDim ];
-		final long[] actualSize = new long[ nDim ];
+		final RandomAccessibleInterval< LabelMultisetType > source = getSource( new N5CacheLoader( reader, inputDatasetName ), sourceDimensions, sourceBlockSize );
 
-		final CacheLoader< Long, Cell< VolatileLabelMultisetArray > > cacheLoader = new N5CacheLoader( reader, inputDatasetName );
-
-//		final BoundedSoftRefLoaderCache< Long, Cell< VolatileLabelMultisetArray > > cache = new BoundedSoftRefLoaderCache<>( 1 );
-		final SoftRefLoaderCache< Long, Cell< VolatileLabelMultisetArray > > cache = new SoftRefLoaderCache<>();
-		final LoaderCacheAsCacheAdapter< Long, Cell< VolatileLabelMultisetArray > > wrappedCache = new LoaderCacheAsCacheAdapter<>( cache, cacheLoader );
-
-		final CachedCellImg< LabelMultisetType, VolatileLabelMultisetArray > inputImg = new CachedCellImg<>(
-				new CellGrid( dimensions, blocksize ), new LabelMultisetType(), wrappedCache, new VolatileLabelMultisetArray( 0, true ) );
-
+		// TODO Should this be passed from outside? Needs to load one additional
+		// block for (almost) all tasks
 		int eachCount = 0;
-		for ( final Entry< Label > e : inputImg.firstElement().entrySet() )
+		for ( final Entry< Label > e : Util.getTypeFromInterval( source ).entrySet() )
 			eachCount += e.getCount();
+		final RandomAccessible< LabelMultisetType > extendedImg = Views.extendValue( source, LabelUtils.getOutOfBounds( eachCount ) );
 
-		final RandomAccessible< LabelMultisetType > extendedImg = Views.extendValue( inputImg, LabelUtils.getOutOfBounds( eachCount ) );
-
-		VolatileLabelMultisetArray downscaledCell;
-
-		int numCellsDownscaled = 0;
-
+		// Hopefully, the block size of this is consistent with the size of
+		// blockSizeInTarget
 		final N5Writer writer = new N5FSWriter( outputGroupName );
 		final DatasetAttributes writerAttributes = writer.getDatasetAttributes( outputDatasetName );
 
 		final long[] writeLocation = new long[ nDim ];
 
-		for ( int d = 0; d < nDim; )
-		{
+		final VolatileLabelMultisetArray downscaledCell = LabelMultisetTypeDownscaler.createDownscaledCell( Views.offsetInterval( extendedImg, blockMinInSource, blockSizeInSource ), factor );
 
-			Arrays.setAll( actualLocation, i -> factor[ i ] * ( targetMin[ i ] + offset[ i ] ) );
+		final byte[] bytes = new byte[ LabelMultisetTypeDownscaler.getSerializedVolatileLabelMultisetArraySize( downscaledCell ) ];
+		LabelMultisetTypeDownscaler.serializeVolatileLabelMultisetArray( downscaledCell, bytes );
 
-			// TODO: figure out what part of this is redundant, if any, and
-			// clarify it
-			Arrays.setAll( actualSize, i -> Math.min(
-					factor[ i ] * ( offset[ i ] + blocksize[ i ] > targetMin[ i ] + targetSize[ i ] ? targetMin[ i ] + targetSize[ i ] - offset[ i ] : blocksize[ i ] ),
-					factor[ i ] * ( int ) Math.ceil( ( dimensions[ i ] - actualLocation[ i ] ) / ( double ) factor[ i ] ) ) );
+		for ( int i = 0; i < nDim; i++ )
+			writeLocation[ i ] = blockMinInTarget[ i ] / writerAttributes.getBlockSize()[ i ];
 
-			downscaledCell = LabelMultisetTypeDownscaler.createDownscaledCell( Views.offsetInterval( extendedImg, actualLocation, actualSize ), factor );
+		final ByteArrayDataBlock dataBlock = new ByteArrayDataBlock( blockSizeInTarget, writeLocation, bytes );
+		writer.writeBlock( outputDatasetName, writerAttributes, dataBlock );
 
-			final byte[] bytes = new byte[ LabelMultisetTypeDownscaler.getSerializedVolatileLabelMultisetArraySize( downscaledCell ) ];
-			LabelMultisetTypeDownscaler.serializeVolatileLabelMultisetArray( downscaledCell, bytes );
+	}
 
-			for ( int i = 0; i < nDim; i++ )
-				writeLocation[ i ] = ( targetMin[ i ] + offset[ i ] ) / blocksize[ i ];
+	public static RandomAccessibleInterval< LabelMultisetType > getSource(
+			final CacheLoader< Long, Cell< VolatileLabelMultisetArray > > cacheLoader,
+			final long[] dimensions,
+			final int[] blockSize )
+	{
+		final SoftRefLoaderCache< Long, Cell< VolatileLabelMultisetArray > > cache = new SoftRefLoaderCache<>();
+		final LoaderCacheAsCacheAdapter< Long, Cell< VolatileLabelMultisetArray > > wrappedCache = new LoaderCacheAsCacheAdapter<>( cache, cacheLoader );
 
-			final ByteArrayDataBlock dataBlock = new ByteArrayDataBlock( blocksize, writeLocation, bytes );
-			writer.writeBlock( outputDatasetName, writerAttributes, dataBlock );
-
-			numCellsDownscaled++;
-
-			for ( d = 0; d < nDim; d++ )
-			{
-				offset[ d ] += blocksize[ d ];
-				if ( offset[ d ] < targetSize[ d ] )
-					break;
-				else
-					offset[ d ] = 0;
-			}
-		}
-
+		final CachedCellImg< LabelMultisetType, VolatileLabelMultisetArray > source = new CachedCellImg<>(
+				new CellGrid( dimensions, blockSize ), new LabelMultisetType(), wrappedCache, new VolatileLabelMultisetArray( 0, true ) );
+		return source;
 	}
 }

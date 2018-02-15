@@ -143,7 +143,7 @@ public class SparkDownsampler
 			final String readGroupName,
 			final String readDatasetName,
 			final int[] downsampleFactor,
-			final int[] parallelSize,
+			final int[] blockSize,
 			final String outputGroupName,
 			final String outputDatasetName,
 			final Compression compression ) throws IOException
@@ -153,7 +153,6 @@ public class SparkDownsampler
 
 		final long[] dimensions = attributes.getDimensions();
 		final long[] max = Arrays.stream( dimensions ).map( dim -> dim - 1 ).toArray();
-		final int[] blockSize = attributes.getBlockSize();
 
 		final List< long[] > positions = new ArrayList<>();
 
@@ -164,19 +163,15 @@ public class SparkDownsampler
 		Arrays.setAll( downsampledDimensions, i -> ( long ) Math.ceil( ( double ) dimensions[ i ] / downsampleFactor[ i ] ) );
 
 		final long[] offset = new long[ nDim ];
-		final int[] actualSize = new int[ nDim ];
 
 		for ( int d = 0; d < nDim; )
 		{
-
-			for ( int i = 0; i < nDim; i++ )
-				actualSize[ i ] = ( int ) Math.min( parallelSize[ i ] * blockSize[ i ], downsampledDimensions[ i ] - offset[ i ] );
 
 			positions.add( offset.clone() );
 
 			for ( d = 0; d < nDim; d++ )
 			{
-				offset[ d ] += parallelSize[ d ] * blockSize[ d ];
+				offset[ d ] += blockSize[ d ];
 				if ( offset[ d ] < downsampledDimensions[ d ] )
 					break;
 				else
