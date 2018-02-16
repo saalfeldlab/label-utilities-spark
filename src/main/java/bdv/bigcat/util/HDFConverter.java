@@ -69,7 +69,7 @@ public class HDFConverter
 		private int[] blockSize;
 
 		@Option( names = { "--compression", "-c" }, description = "Compression type to use in output N5 dataset" )
-		public String compressionType = "{\"type\":\"raw\"}";
+		public String compressionType = "{\"type\":\"gzip\",\"level\":-1}";
 
 		@Override
 		public Void call() throws IOException
