@@ -1,6 +1,7 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
-	
+
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
@@ -9,26 +10,26 @@
 
 	<artifactId>hdf-n5-converter</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	
-  	<name>HDF to N5 Converter</name>
+
+	<name>HDF to N5 Converter</name>
 	<description>Converts labeled HDF5 data to an N5 dataset of labels</description>
-  
-	
+
+
 	<properties>
 		<scijava.jvm.version>1.8</scijava.jvm.version>
 	</properties>
-	
+
 	<repositories>
 		<repository>
 			<id>imagej.public</id>
 			<url>http://maven.imagej.net/content/groups/public</url>
 		</repository>
 		<repository>
-        	<id>saalfeld-lab-maven-repo</id>
-        	<url>https://saalfeldlab.github.io/maven</url>
-    	</repository>
+			<id>saalfeld-lab-maven-repo</id>
+			<url>https://saalfeldlab.github.io/maven</url>
+		</repository>
 	</repositories>
-	
+
 	<dependencies>
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
@@ -70,7 +71,7 @@
 			<version>2.3.0</version>
 		</dependency>
 	</dependencies>
-	
+
 	<profiles>
 		<profile>
 			<id>fatWithSpark</id>
@@ -87,6 +88,7 @@
 					<plugin>
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-shade-plugin</artifactId>
+						<version>3.1.0</version>
 						<configuration>
 							<filters>
 								<filter>
@@ -102,6 +104,13 @@
 							<shadedArtifactAttached>true</shadedArtifactAttached>
 							<!-- Do not minimize for now to speed up packaging. -->
 							<!-- <minimzeJar>true</minimzeJar> -->
+
+							<relocations>
+								<relocation>
+									<pattern>org.apache.commons.compress</pattern>
+									<shadedPattern>org.janelia.saalfeldlab.org.apache.commons.compress</shadedPattern>
+								</relocation>
+							</relocations>
 						</configuration>
 						<executions>
 							<execution>
@@ -123,6 +132,7 @@
 					<plugin>
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-shade-plugin</artifactId>
+						<version>3.1.0</version>
 						<configuration>
 							<filters>
 								<filter>
@@ -145,6 +155,13 @@
 							<shadedArtifactAttached>true</shadedArtifactAttached>
 							<!-- Do not minimize for now to speed up packaging. -->
 							<!-- <minimzeJar>true</minimzeJar> -->
+
+							<relocations>
+								<relocation>
+									<pattern>org.apache.commons.compress</pattern>
+									<shadedPattern>org.janelia.saalfeldlab.org.apache.commons.compress</shadedPattern>
+								</relocation>
+							</relocations>
 						</configuration>
 						<executions>
 							<execution>
