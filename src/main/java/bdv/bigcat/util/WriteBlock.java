@@ -6,6 +6,7 @@ import org.janelia.saalfeldlab.n5.CompressionAdapter;
 import org.janelia.saalfeldlab.n5.DataBlock;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
+import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.N5Writer;
 
 import com.google.gson.Gson;
@@ -52,7 +53,11 @@ public class WriteBlock< T, B extends DataBlock< T > > implements VoidFunction< 
 				.create();
 		writer.writeBlock(
 				dataset,
-				new DatasetAttributes( dimensions, blockSize, dataType, gson.fromJson( compression, Compression.class ) ),
+				new DatasetAttributes( dimensions, blockSize, dataType, new GzipCompression() ), // .fromJson(
+																									// compression,
+																									// Compression.class
+																									// )
+																									// ),
 				block );
 
 	}

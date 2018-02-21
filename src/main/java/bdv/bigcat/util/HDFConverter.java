@@ -16,6 +16,7 @@ import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
 import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.CompressionAdapter;
 import org.janelia.saalfeldlab.n5.DataType;
+import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.N5FSReader;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
@@ -79,7 +80,10 @@ public class HDFConverter
 			final Gson gson = new GsonBuilder()
 					.registerTypeHierarchyAdapter( Compression.class, CompressionAdapter.getJsonAdapter() )
 					.create();
-			final Compression compression = gson.fromJson( compressionType, Compression.class );
+			final Compression compression = new GzipCompression();// .fromJson(
+																	// compressionType,
+																	// Compression.class
+																	// );
 			final int nDim = n5Reader( this.inputGroup ).getDatasetAttributes( this.inputDataset ).getNumDimensions();
 			final int[] blockSize = this.blockSize.length < nDim ? IntStream.generate( () -> this.blockSize[ 0 ] ).limit( nDim ).toArray() : this.blockSize;
 
@@ -186,7 +190,10 @@ public class HDFConverter
 
 	public static boolean isHDF( final String base )
 	{
-		return Pattern.matches( "^h5://", base ) || Pattern.matches( "^.*\\.(hdf|h5)$", base );
+		LOG.warn( "Checking {} for HDF", base );
+		final boolean isHDF = Pattern.matches( "^h5://", base ) || Pattern.matches( "^.*\\.(hdf|h5)$", base );
+		LOG.warn( "{} is hdf5? {}", base, isHDF );
+		return isHDF;
 	}
 
 	public static ByteArrayDataBlock toDataBlock(
