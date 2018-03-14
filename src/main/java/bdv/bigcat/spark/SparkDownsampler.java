@@ -189,7 +189,7 @@ public class SparkDownsampler
 
 		sc.parallelize( positions )
 				.map( new MinToInterval( max, blockSize ) )
-				.foreach( new SparkDownsampleFunction( readGroupName, readDatasetName, downsampleFactor, outputGroupName, outputDatasetName ) );
+				.foreach( new SparkDownsampleFunction( readGroupName, readDatasetName, downsampleFactor, outputGroupName, outputDatasetName, 0 ) );
 
 //		System.out.println( "Across " + positions.size() + " parallelized sections, " + output + " cells were downscaled" );
 	}
