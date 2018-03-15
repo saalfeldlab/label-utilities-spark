@@ -42,6 +42,8 @@ public class SparkDownsampler
 
 	private static final String DOWNSAMPLING_FACTORS_KEY = "downsamplingFactors";
 
+	private static final String MAX_NUM_ENTRIES_KEY = "maxNumEntries";
+
 	public static class CommandLineParameters implements Callable< Void >
 	{
 
@@ -213,6 +215,7 @@ public class SparkDownsampler
 		final double[] accumulatedDownsamplingFactor = IntStream.range( 0, nDim ).mapToDouble( d -> previousDownsamplingFactor[ d ] * downsampleFactor[ d ] ).toArray();
 		writer.createDataset( outputDatasetName, downsampledDimensions, blockSize, DataType.UINT8, compression );
 		writer.setAttribute( outputDatasetName, DOWNSAMPLING_FACTORS_KEY, accumulatedDownsamplingFactor );
+		writer.setAttribute( outputDatasetName, MAX_NUM_ENTRIES_KEY, maxNumEntries );
 
 		sc.parallelize( positions )
 				.map( new MinToInterval( max, blockSize ) )
