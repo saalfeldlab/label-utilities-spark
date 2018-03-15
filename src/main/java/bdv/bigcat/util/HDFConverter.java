@@ -190,9 +190,9 @@ public class HDFConverter
 
 	public static boolean isHDF( final String base )
 	{
-		LOG.warn( "Checking {} for HDF", base );
+		LOG.debug( "Checking {} for HDF", base );
 		final boolean isHDF = Pattern.matches( "^h5://", base ) || Pattern.matches( "^.*\\.(hdf|h5)$", base );
-		LOG.warn( "{} is hdf5? {}", base, isHDF );
+		LOG.debug( "{} is hdf5? {}", base, isHDF );
 		return isHDF;
 	}
 
