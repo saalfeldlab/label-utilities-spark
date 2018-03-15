@@ -101,6 +101,13 @@ public class SparkDownsampler
 			final int[][] blockSizes = getBlockSizes();
 			final Compression compression = fromString( compressionType );
 
+			for ( int i = 0; i < factors.length; ++i )
+				if ( !checkScaleFactors( factors[ i ] ) )
+				{
+					LOG.error( "Got illegal downscaling factors: {}", factors[ i ] );
+					throw new IllegalArgumentException( "Got illegal downscaling factors: " + Arrays.toString( factors[ i ] ) );
+				}
+
 			final SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
@@ -164,6 +171,12 @@ public class SparkDownsampler
 	{
 
 		final DatasetAttributes attributes = reader.getDatasetAttributes( readDatasetName );
+
+		if ( !checkBlockSize( attributes.getBlockSize(), blockSize, downsampleFactor ) )
+		{
+			LOG.error( "Got illegal block sizefactors: previous={}, current={}, factors={}", attributes.getBlockSize(), blockSize, downsampleFactor );
+			throw new IllegalArgumentException( "Got illegal downscaling factors:" );
+		}
 
 		final long[] dimensions = attributes.getDimensions();
 		final long[] max = Arrays.stream( dimensions ).map( dim -> dim - 1 ).toArray();
@@ -235,5 +248,36 @@ public class SparkDownsampler
 		gsonBuilder.registerTypeHierarchyAdapter( Compression.class, CompressionAdapter.getJsonAdapter() );
 		final Gson gson = gsonBuilder.create();
 		return gson.fromJson( str, Compression.class );
+	}
+
+	public static boolean checkScaleFactors( final int[] scaleFactors )
+	{
+		for ( final int factor : scaleFactors )
+			if ( factor < 1 )
+				return false;
+		return true;
+	}
+
+	/**
+	 *
+	 * Each block at lower resolution must border-align with the scaled blocks
+	 * at the lower resolution, i.e. the block size of a lower dimension block
+	 * multiplied with the scale facotr must be an integer multiple of the block
+	 * size at higher resolution for all dimensions.
+	 *
+	 * @param blockSizePrevious
+	 * @param blockSizeCurrent
+	 * @param scaleFactors
+	 * @return
+	 */
+	public static boolean checkBlockSize(
+			final int[] blockSizePrevious,
+			final int[] blockSizeCurrent,
+			final int[] scaleFactors )
+	{
+		for ( int d = 0; d < scaleFactors.length; ++d )
+			if ( blockSizeCurrent[ d ] * scaleFactors[ d ] % blockSizePrevious[ d ] != 0 )
+				return false;
+		return true;
 	}
 }
