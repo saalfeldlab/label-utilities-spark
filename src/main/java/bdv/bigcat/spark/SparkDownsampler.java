@@ -31,7 +31,6 @@ import org.slf4j.LoggerFactory;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
-import gnu.trove.list.array.TIntArrayList;
 import picocli.CommandLine;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -103,7 +102,6 @@ public class SparkDownsampler
 			final Compression compression = fromString( compressionType );
 
 			final SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
-			final TIntArrayList maxNumEntriesList = new TIntArrayList();
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
 
@@ -129,7 +127,6 @@ public class SparkDownsampler
 
 					final int maxNumEntries = factorIndex < this.maxNumEntries.length ? this.maxNumEntries[ factorIndex ] : lastMaxNumEntries;
 					lastMaxNumEntries = maxNumEntries;
-					maxNumEntriesList.add( maxNumEntries );
 
 					SparkDownsampler.downsample( sc,
 							new N5FSReader( group ),
@@ -144,7 +141,6 @@ public class SparkDownsampler
 				}
 			}
 
-			System.out.println( "YO " + maxNumEntriesList );
 			return null;
 		}
 
