@@ -5,6 +5,8 @@ import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
 import java.util.concurrent.Callable;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
@@ -47,6 +49,14 @@ public class HDFConverter
 	private static final Logger LOG = LoggerFactory.getLogger( MethodHandles.lookup().lookupClass() );
 
 	public static final String LABEL_MULTISETTYPE_KEY = "isLabelMultiset";
+
+	public static final String DATA_TYPE_KEY = "dataType";
+
+	public static final String COMPRESSION_KEY = "compression";
+
+	public static final String BLOCK_SIZE_KEY = "blockSize";
+
+	public static final String DIMENSIONS_KEY = "dimensions";
 
 	public static final int DEFAULT_BLOCK_SIZE = 64;
 
@@ -133,6 +143,14 @@ public class HDFConverter
 	{
 		final N5Reader reader = n5Reader( inputGroup, blockSize );
 		final RandomAccessibleInterval< I > img = N5Utils.open( reader, inputDataset );
+		final Map< String, Class< ? > > attributeNames = reader.listAttributes( inputDataset );
+		Arrays.asList(
+				LABEL_MULTISETTYPE_KEY,
+				DATA_TYPE_KEY,
+				COMPRESSION_KEY,
+				BLOCK_SIZE_KEY,
+				DIMENSIONS_KEY )
+				.forEach( attributeNames::remove );
 
 		final int nDim = img.numDimensions();
 
@@ -142,6 +160,8 @@ public class HDFConverter
 		final N5Writer writer = n5Writer( outputGroupName, blockSize );
 		writer.createDataset( outputDatasetName, dimensions, blockSize, DataType.UINT8, compression );
 		writer.setAttribute( outputDatasetName, LABEL_MULTISETTYPE_KEY, true );
+		for ( final Entry< String, Class< ? > > entry : attributeNames.entrySet() )
+			writer.setAttribute( outputDatasetName, entry.getKey(), reader.getAttribute( inputDataset, entry.getKey(), entry.getValue() ) );
 
 		final List< long[] > offsets = new ArrayList<>();
 
