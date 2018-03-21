@@ -3,6 +3,9 @@ Command-line converter tool for turning labeled HDF5 data into an [N5](https://g
 
 ## Compile
 
+Currently depends on:
+https://github.com/hanslovsky/n5-hdf5/tree/reorder-array-attributes
+
 To compile a "fat jar" with all dependencies added, run:
 
 ```
