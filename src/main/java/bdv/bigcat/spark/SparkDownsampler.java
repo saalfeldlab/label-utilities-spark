@@ -67,7 +67,7 @@ public class SparkDownsampler
 		private int[] maxNumEntries;
 
 		@Option( names = { "--compression", "-c" }, description = "Compression type to use in output N5 dataset" )
-		public String compressionType = "{\"type\":\"raw\"}";
+		public String compressionType = "{\"type\":\"gzip\",\"level\":\"-1\"}";
 
 		@Option( names = { "-h", "--help" }, usageHelp = true, description = "display a help message" )
 		private boolean helpRequested;
