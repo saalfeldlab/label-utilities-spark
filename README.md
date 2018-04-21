@@ -83,3 +83,28 @@ java -cp "${JAR}" \
    Show help/usage
    
 Note that the `spark.master` property must be set when running as well. See [here](http://spark.apache.org/docs/latest/submitting-applications.html#master-urls) for more information on Spark Master URLs.
+
+#### Example
+```bash
+N_NODES=${N_NODES:-10}
+N_EXECUTORS_PER_NODE=${N_EXECUTORS_PER_NODE:-15}
+
+# N5 group that holds integer type labels
+# N5_GROUP="/nrs/saalfeld/hanslovskyp/n5-examples"
+N5_GROUP="/nrs/saalfeld/lauritzen/02/example.n5"
+# input dataset
+DATASET="volumes/labels/multicut_more_features-multisets-256,256,26"
+
+JAR="$HOME/bigcat-spark-downsampler-0.0.1-SNAPSHOT-shaded.jar"
+CLASS="bdv.bigcat.spark.SparkDownsampler"
+
+N_EXECUTORS_PER_NODE=$N_EXECUTORS_PER_NODE \
+         $HOME/flintstone/flintstone.sh ${N_NODES} $JAR $CLASS \
+         -g "${N5_GROUP}" \
+         -d "${DATASET}" \
+         -b 256,256,52 \
+         -b 256,256,104 \
+         -b 256,256,208 \
+         -m 5 \
+         2,2,1 2,2,1 2,2,1 2,2,2 2,2,2 2,2,2 2,2,2 2,2,2 2,2,2 2,2,2
+```
