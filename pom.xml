@@ -8,11 +8,11 @@
 		<version>19.0.0</version>
 	</parent>
 
-	<artifactId>hdf-n5-converter</artifactId>
+	<artifactId>n5-label-multisets-spark</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 
-	<name>HDF to N5 Converter</name>
-	<description>Converts labeled HDF5 data to an N5 dataset of labels</description>
+	<name>N5-Label-Multisets-Spark</name>
+	<description>Spark based tools for n5 label multisets.</description>
 
 
 	<properties>
@@ -32,21 +32,6 @@
 
 	<dependencies>
 		<dependency>
-			<groupId>org.janelia.saalfeldlab</groupId>
-			<artifactId>n5-label-multisets</artifactId>
-			<version>0.1.0</version>
-		</dependency>
-		<dependency>
-			<groupId>org.janelia.saalfeldlab</groupId>
-			<artifactId>n5-imglib2</artifactId>
-			<version>2.0.0</version>
-		</dependency>
-		<dependency>
-			<groupId>org.janelia.saalfeldlab</groupId>
-			<artifactId>n5-hdf5</artifactId>
-			<version>1.0.2</version>
-		</dependency>
-		<dependency>
 			<groupId>org.apache.spark</groupId>
 			<artifactId>spark-core_2.11</artifactId>
 			<version>2.1.0</version>
@@ -61,9 +46,38 @@
 			<version>1.0.0-beta-8-SNAPSHOT</version>
 		</dependency>
 		<dependency>
+			<groupId>net.imglib2</groupId>
+			<artifactId>imglib2-algorithm</artifactId>
+			<version>0.8.3-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>org.janelia.saalfeldlab</groupId>
+			<artifactId>n5</artifactId>
+			<version>2.0.1</version>
+		</dependency>
+		<dependency>
+			<groupId>org.janelia.saalfeldlab</groupId>
+			<artifactId>n5-imglib2</artifactId>
+			<version>2.0.0</version>
+		</dependency>
+		<dependency>
+			<groupId>org.janelia.saalfeldlab</groupId>
+			<artifactId>n5-hdf5</artifactId>
+			<version>1.0.2</version>
+		</dependency>
+		<dependency>
+			<groupId>org.janelia.saalfeldlab</groupId>
+			<artifactId>n5-label-multisets</artifactId>
+			<version>0.1.0</version>
+		</dependency>
+		<dependency>
 			<groupId>info.picocli</groupId>
 			<artifactId>picocli</artifactId>
 			<version>2.3.0</version>
+		</dependency>
+		<dependency>
+			<groupId>org.slf4j</groupId>
+			<artifactId>slf4j-api</artifactId>
 		</dependency>
 	</dependencies>
 
