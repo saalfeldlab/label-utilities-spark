@@ -33,7 +33,6 @@ To run locally, run
 java \
     -Dspark.master=local[*] \
     -jar target/n5-label-multisets-spark-0.1.0-SNAPSHOT-shaded.jar convert [--help/-h] [ARG...]
-```ARG...]
 ```
 
 ### Downsample
