@@ -1,4 +1,4 @@
-package bdv.bigcat.spark;
+package org.janelia.saalfeldlab.multisets.spark.downsample;
 
 import java.util.Arrays;
 import java.util.List;

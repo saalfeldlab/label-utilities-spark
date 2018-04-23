@@ -1,4 +1,4 @@
-package bdv.bigcat.spark;
+package org.janelia.saalfeldlab.multisets.spark.downsample;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
