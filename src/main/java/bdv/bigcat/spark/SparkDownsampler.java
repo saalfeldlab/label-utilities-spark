@@ -47,16 +47,16 @@ public class SparkDownsampler
 	public static class CommandLineParameters implements Callable< Void >
 	{
 
-		@Option( names = { "--group", "-g" }, required = true, description = "Input group name (N5 group)" )
-		private String group;
+		@Option( names = { "--n5-root", "-r" }, paramLabel = "ROOT", required = true, description = "Input N5 container" )
+		private String n5;
 
-		@Option( names = { "--dataset", "-d" }, required = true, description = "Input dataset name (N5 relative path from group)" )
-		private String dataset;
+		@Option( names = { "--group", "-g" }, paramLabel = "MULTISCALE_GROUP", required = true, description = "Multi scale group(relative to N5). Must contain dataset s0 for first scale level unless --link-mipmap-level-zero is specified." )
+		private String multiscaleGroup;
 
-		@Parameters( arity = "1..*", description = "Factor by which to downscale the input image. Factors are relative to the previous level, not to level zero. Format either fx,fy,fz or f" )
+		@Parameters( arity = "1..*", paramLabel = "FACTOR", description = "Factor by which to downscale the input image. Factors are relative to the previous level, not to level zero. Format either fx,fy,fz or f" )
 		private String[] factors;
 
-		@Option( names = { "--block-size", "-b" }, description = "Size of the blocks (in cells) to parallelize with Spark. Format either bx,by,bz or b" )
+		@Option( names = { "--block-size", "-b" }, paramLabel = "BLOCK_SIZE", description = "Size of the blocks (in cells) to parallelize with Spark. Format either bx,by,bz or b" )
 		private String[] blockSize;
 
 		@Option(
@@ -66,13 +66,13 @@ public class SparkDownsampler
 				description = "Maximum number of multiset entries at each pixels. Values smaller than 1 do not limit the number of entries. Defaults to previous level if not specified. Defaults to -1 for the first level if not specified" )
 		private int[] maxNumEntries;
 
-		@Option( names = { "--compression", "-c" }, description = "Compression type to use in output N5 dataset" )
+		@Option( names = { "--compression", "-c" }, paramLabel = "COMPRESSION", description = "Compression type to use in output N5 dataset" )
 		public String compressionType = "{\"type\":\"gzip\",\"level\":\"-1\"}";
 
 		@Option( names = { "-h", "--help" }, usageHelp = true, description = "display a help message" )
 		private boolean helpRequested;
 
-		@Option( names = { "--link-mipmap-level-zero", "-l" }, required = false )
+		@Option( names = { "--link-mipmap-level-zero", "-l" }, paramLabel = "PATH_TO_S0", required = false )
 		public String pathToMipmapLevelZero;
 
 //		@Option( names = { "--copy-original-dataset", "-C" }, description = "Create a copy of the original data set for the first mipmap level. A symlink is created by default" )
@@ -116,7 +116,7 @@ public class SparkDownsampler
 
 				if ( pathToMipmapLevelZero != null )
 				{
-					final Path linkLocation = Paths.get( group, dataset, "s0" );
+					final Path linkLocation = Paths.get( n5, multiscaleGroup, "s0" );
 					linkLocation.getParent().toFile().mkdirs();
 					LOG.debug( "Creating link at `{}' pointing to `{}'", linkLocation, pathToMipmapLevelZero );
 					try
@@ -131,19 +131,19 @@ public class SparkDownsampler
 				int lastMaxNumEntries = -1;
 				for ( int factorIndex = 0, level = 1; factorIndex < factors.length; ++factorIndex, ++level )
 				{
-					final String previousScaleLevel = dataset + "/s" + ( level - 1 );
-					final String currentScaleLevel = dataset + "/s" + level;
+					final String previousScaleLevel = multiscaleGroup + "/s" + ( level - 1 );
+					final String currentScaleLevel = multiscaleGroup + "/s" + level;
 
 					final int maxNumEntries = factorIndex < this.maxNumEntries.length ? this.maxNumEntries[ factorIndex ] : lastMaxNumEntries;
 					lastMaxNumEntries = maxNumEntries;
 
 					SparkDownsampler.downsample( sc,
-							new N5FSReader( group ),
-							group,
+							new N5FSReader( n5 ),
+							n5,
 							previousScaleLevel,
 							factors[ factorIndex ],
 							blockSizes[ factorIndex ],
-							group,
+							n5,
 							currentScaleLevel,
 							compression,
 							maxNumEntries );

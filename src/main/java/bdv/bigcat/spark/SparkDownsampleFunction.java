@@ -121,7 +121,11 @@ public class SparkDownsampleFunction implements VoidFunction< Interval >
 		final long[] writeLocation = new long[ nDim ];
 
 		final VolatileLabelMultisetArray downscaledCell = LabelMultisetTypeDownscaler
-				.createDownscaledCell( Views.offsetInterval( source, blockMinInSource, blockSizeInSource ), factor, containedLabels, maxNumEntries );
+				.createDownscaledCell(
+						Views.offsetInterval( source, blockMinInSource, blockSizeInSource ),
+						factor,
+						containedLabels,
+						maxNumEntries );
 
 		final byte[] bytes = new byte[ LabelMultisetTypeDownscaler.getSerializedVolatileLabelMultisetArraySize( downscaledCell ) ];
 		LabelMultisetTypeDownscaler.serializeVolatileLabelMultisetArray( downscaledCell, bytes );
