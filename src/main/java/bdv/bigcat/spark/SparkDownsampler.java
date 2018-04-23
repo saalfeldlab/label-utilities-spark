@@ -161,6 +161,11 @@ public class SparkDownsampler
 
 	public static void main( final String[] args ) throws IOException
 	{
+		run( args );
+	}
+
+	public static void run( final String[] args ) throws IOException
+	{
 		CommandLine.call( new CommandLineParameters(), System.err, args );
 	}
 
