@@ -134,6 +134,11 @@ public class ConvertToLabelMultisetType
 
 	public static void main( final String... args ) throws IOException
 	{
+		run( args );
+	}
+
+	public static void run( final String... args ) throws IOException
+	{
 		System.out.println( "Command line arguments: " + Arrays.toString( args ) );
 		LOG.debug( "Command line arguments: ", Arrays.toString( args ) );
 		CommandLine.call( new CommandLineParameters(), System.err, args );
