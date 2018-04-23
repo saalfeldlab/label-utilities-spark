@@ -86,6 +86,7 @@ public class HDFConverter
 		public Void call() throws IOException
 		{
 			this.blockSize = this.blockSize == null || this.blockSize.length == 0 ? new int[] { DEFAULT_BLOCK_SIZE } : this.blockSize;
+			this.outputGroupName = this.outputGroupName == null ? this.inputGroup : this.outputGroupName;
 
 			final Gson gson = new GsonBuilder()
 					.registerTypeHierarchyAdapter( Compression.class, CompressionAdapter.getJsonAdapter() )

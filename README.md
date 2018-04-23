@@ -3,51 +3,45 @@ Command-line converter tool for turning labeled HDF5 data into an [N5](https://g
 
 ## Compile
 
+Currently depends on:
+https://github.com/hanslovsky/n5-hdf5/tree/reorder-array-attributes
+
 To compile a "fat jar" with all dependencies added, run:
 
 ```
-mvn clean compile assembly:single
+mvn -Pfat clean package
 ```
 
 ## Usage
 
+```BASH
+N_NODES=${N_NODES:-10}
+N_EXECUTORS_PER_NODE=${N_EXECUTORS_PER_NODE:-15}
+
+# N5 group that holds integer type labels
+N5_GROUP="/nrs/saalfeld/lauritzen/02/workspace.n5"
+# group for output (optional, defaults to ${N5_GROUP})
+# N5_GROUP_OUTPUT="/nrs/saalfeld/hanslovskyp/n5-examples"
+# N5_GROUP_OUTPUT="/groups/saalfeld/home/hanslovskyp/lauritzen/03/workspace.n5"
+N5_GROUP_OUTPUT="/nrs/saalfeld/lauritzen/02/example.n5"
+
+# input dataset
+DATASET="filtered/segmentation_old/multicut_more_features"
+
+BLOCKSIZE=${BLOCKSIZE:-64,64,64}
+
+# N5 dataset for result (optional, defaults to 'supervoxels')
+TARGET="volumes/labels/multicut_more_features-multisets-${BLOCKSIZE}/s0"
+N
+JAR="$HOME/hdf-n5-converter-0.0.1-SNAPSHOT-shaded.jar"
+CLASS="bdv.bigcat.util.HDFConverter"
+
+N_EXECUTORS_PER_NODE=$N_EXECUTORS_PER_NODE \
+         $HOME/flintstone/flintstone.sh ${N_NODES} $JAR $CLASS \
+         -g "${N5_GROUP}" \
+         -G "${N5_GROUP_OUTPUT}" \
+         -d "${DATASET}" \
+         -b "${BLOCKSIZE}" \
+         "${TARGET}"
+
 ```
-java -jar target/hdf-n5-converter-0.0.1-SNAPSHOT-jar-with-dependencies.jar [args]
-```
-
-#### Arguments
-
--  `--cellsize`, `-cs`
-   Size of cells to use in the output N5 dataset. Default: `64,64,8`
-   
--  `--compression`, `-c`
-   Compression type to use in output N5 dataset. Default: `RAW`
-   
--  `--datasetname`, `--data`, `-d`
-   Output dataset name (N5 relative path from group)
-   (**Required**)
-   
--  `--groupname`, `--group`, `-g`
-   Output group name (N5 group)
-   (**Required**)
-   
--  `--inputfile`, `--input`, `-i`
-   Input HDF5 file
-   (**Required**)
-   
--   `--label`, `-l`
-   Path to labels in HDF5 file. Default:`/volumes/labels/neuron_ids`
-
-#### Example
-
-```
-java -jar target/hdf-n5-converter-0.0.1-SNAPSHOT-jar-with-dependencies.jar --input ~/sample_A_20160501.hdf --group ~/n5 --data sampleA-fullres --compression GZIP
-```
-
-Would write an N5 dataset at `~/n5/sampleA-fullres` from the labels at `/volumes/labels/neuron_ids` in `~/sample_A_20160501.hdf` with GZIP compression (recommended).
-
-
----
-
-
-**NOTE:** This currently requires [`LabelUtils`](https://github.com/shrucis1/bigcat/blob/85c26f718cae97a133e279f3f3ec1e3ab7eaa73d/src/main/java/bdv/labels/labelset/LabelUtils.java) from the `n5cacheloader` branch of [BigCAT](https://github.com/shrucis1/bigcat), which currently is not merged into `master`. To compile this project from source, you must check out that branch and maven install it so that it has the necessary functionality.
