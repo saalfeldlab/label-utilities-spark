@@ -44,6 +44,8 @@ public class SparkDownsampler
 
 	private static final String MAX_NUM_ENTRIES_KEY = "maxNumEntries";
 
+	private static final String MULTI_SCALE_KEY = "multiScale";
+
 	public static class CommandLineParameters implements Callable< Void >
 	{
 
@@ -109,6 +111,8 @@ public class SparkDownsampler
 					LOG.error( "Got illegal downscaling factors: {}", factors[ i ] );
 					throw new IllegalArgumentException( "Got illegal downscaling factors: " + Arrays.toString( factors[ i ] ) );
 				}
+
+			addMultiScaleTage( new N5FSWriter( n5 ), multiscaleGroup );
 
 			final SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
@@ -282,5 +286,12 @@ public class SparkDownsampler
 			if ( blockSizeCurrent[ d ] * scaleFactors[ d ] % blockSizePrevious[ d ] != 0 )
 				return false;
 		return true;
+	}
+
+	public static void addMultiScaleTage( final N5Writer n5, final String group ) throws IOException
+	{
+		if ( !n5.exists( group ) )
+			n5.createGroup( group );
+		n5.setAttribute( group, MULTI_SCALE_KEY, true );
 	}
 }
