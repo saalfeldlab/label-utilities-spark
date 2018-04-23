@@ -64,22 +64,22 @@ public class HDFConverter
 	// various instances of n5 instead
 	static public class CommandLineParameters implements Callable< Void >
 	{
-		@Option( names = { "--input-group", "-g" }, required = true, description = "Input N5 group." )
-		private String inputGroup;
+		@Option( names = { "--input-n5", "-i" }, paramLabel = "INPUT_N5", required = true, description = "Input N5 container. Currently supports N5 and HDF5." )
+		private String inputN5;
 
-		@Option( names = { "--output-group", "-G" }, description = "Output group name (N5 group). Defaults to INPUT_GROUP" )
-		private String outputGroupName;
+		@Option( names = { "--output-n5", "-o" }, paramLabel = "OUTPUT_N5", description = "Output N5 container. Defaults to INPUT_N5" )
+		private String outputN5;
 
-		@Option( names = { "--dataset", "-d" }, required = true, description = "Input dataset name (N5 relative path from group)" )
+		@Option( names = { "--dataset", "-d" }, paramLabel = "INPUT_DATASET", required = true, description = "Input dataset name (relative to INPUT_N5" )
 		private String inputDataset;
 
-		@Parameters( arity = "1", description = "Output dataset relative to OUTPUT_GROUP" )
+		@Parameters( arity = "1", paramLabel = "OUTPUT_DATASET", description = "Output dataset name (relative to OUTPUT_N5)" )
 		private String outputDatasetName;
 
-		@Option( names = { "--block-size", "-b" }, description = "Size of cells to use in the output N5 dataset. Defaults to 64", split = "," )
+		@Option( names = { "--block-size", "-b" }, paramLabel = "BLOCK_SIZE", description = "Size of cells to use in the output N5 dataset. Defaults to 64. Either single integer value for isotropic block size or comma-seperated list of block size per dimension", split = "," )
 		private int[] blockSize;
 
-		@Option( names = { "--compression", "-c" }, description = "Compression type to use in output N5 dataset" )
+		@Option( names = { "--compression", "-c" }, paramLabel = "COMPRESSION", description = "Compression type to use in output N5 dataset" )
 		public String compressionType = "{\"type\":\"gzip\",\"level\":-1}";
 
 		@Override
@@ -94,7 +94,7 @@ public class HDFConverter
 																	// compressionType,
 																	// Compression.class
 																	// );
-			final int nDim = n5Reader( this.inputGroup ).getDatasetAttributes( this.inputDataset ).getNumDimensions();
+			final int nDim = n5Reader( this.inputN5 ).getDatasetAttributes( this.inputDataset ).getNumDimensions();
 			final int[] blockSize = this.blockSize.length < nDim ? IntStream.generate( () -> this.blockSize[ 0 ] ).limit( nDim ).toArray() : this.blockSize;
 
 			final long startTime = System.currentTimeMillis();
@@ -105,10 +105,10 @@ public class HDFConverter
 			{
 				convertHDF5toN5(
 						sc,
-						inputGroup,
+						inputN5,
 						inputDataset,
 						blockSize,
-						outputGroupName,
+						outputN5,
 						outputDatasetName,
 						compression );
 			}
@@ -116,7 +116,7 @@ public class HDFConverter
 			final long endTime = System.currentTimeMillis();
 
 			final String formattedTime = DurationFormatUtils.formatDuration( endTime - startTime, "HH:mm:ss.SSS" );
-			System.out.println( "Converted " + inputGroup + " to N5 dataset at " + outputGroupName + " with name " + outputDatasetName +
+			System.out.println( "Converted " + inputN5 + " to N5 dataset at " + outputN5 + " with name " + outputDatasetName +
 					" in " + formattedTime );
 			return null;
 
