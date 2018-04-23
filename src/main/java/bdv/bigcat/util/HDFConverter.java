@@ -82,6 +82,12 @@ public class HDFConverter
 		@Option( names = { "--compression", "-c" }, paramLabel = "COMPRESSION", description = "Compression type to use in output N5 dataset" )
 		public String compressionType = "{\"type\":\"gzip\",\"level\":-1}";
 
+		@Option(
+				names = { "--revert-array-attributes" },
+				required = false,
+				description = "When copying, revert all additional array attributes that are not dataset attributes. E.g. [3,2,1] -> [1,2,3]" )
+		private boolean revertArrayAttributes;
+
 		@Override
 		public Void call() throws IOException
 		{
@@ -111,7 +117,8 @@ public class HDFConverter
 						blockSize,
 						outputN5,
 						outputDatasetName,
-						compression );
+						compression,
+						revertArrayAttributes );
 			}
 
 			final long endTime = System.currentTimeMillis();
@@ -140,7 +147,8 @@ public class HDFConverter
 			final int[] blockSize,
 			final String outputGroupName,
 			final String outputDatasetName,
-			final Compression compression ) throws IOException
+			final Compression compression,
+			final boolean revert ) throws IOException
 	{
 		final N5Reader reader = n5Reader( inputGroup, blockSize );
 		final RandomAccessibleInterval< I > img = N5Utils.open( reader, inputDataset );
@@ -162,7 +170,7 @@ public class HDFConverter
 		writer.createDataset( outputDatasetName, dimensions, blockSize, DataType.UINT8, compression );
 		writer.setAttribute( outputDatasetName, LABEL_MULTISETTYPE_KEY, true );
 		for ( final Entry< String, Class< ? > > entry : attributeNames.entrySet() )
-			writer.setAttribute( outputDatasetName, entry.getKey(), reader.getAttribute( inputDataset, entry.getKey(), entry.getValue() ) );
+			writer.setAttribute( outputDatasetName, entry.getKey(), revertInplaceAndReturn( reader.getAttribute( inputDataset, entry.getKey(), entry.getValue() ), revert ) );
 
 		final List< long[] > offsets = new ArrayList<>();
 
@@ -233,5 +241,101 @@ public class HDFConverter
 		final long[] blockPos = new long[ position.length ];
 		Arrays.setAll( blockPos, d -> position[ d ] / blockSize[ d ] );
 		return blockPos;
+	}
+
+	public static < T > T revertInplaceAndReturn( final T t, final boolean revert )
+	{
+		if ( !revert )
+			return t;
+
+		if ( t instanceof boolean[] )
+		{
+			final boolean[] arr = ( boolean[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final boolean v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof byte[] )
+		{
+			final byte[] arr = ( byte[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final byte v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof char[] )
+		{
+			final char[] arr = ( char[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final char v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof short[] )
+		{
+			final short[] arr = ( short[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final short v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof int[] )
+		{
+			final int[] arr = ( int[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final int v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof long[] )
+		{
+			final long[] arr = ( long[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final long v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof float[] )
+		{
+			final float[] arr = ( float[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final float v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof double[] )
+		{
+			final double[] arr = ( double[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final double v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		return t;
 	}
 }
