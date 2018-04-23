@@ -1,4 +1,4 @@
-package bdv.bigcat.util;
+package org.janelia.saalfeldlab.multisets.spark.convert;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
@@ -43,7 +43,7 @@ import picocli.CommandLine;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-public class HDFConverter
+public class ConvertToLabelMultisetType
 {
 
 	private static final Logger LOG = LoggerFactory.getLogger( MethodHandles.lookup().lookupClass() );
@@ -200,7 +200,7 @@ public class HDFConverter
 				.parallelize( offsets )
 				.map( new ToInterval( dimensions, blockSize ) )
 				.map( new ReadIntegerData< I >( inputGroup, inputDataset, blockSize ) )
-				.map( new ConvertToLabelMultisetType<>() )
+				.map( new ConvertToLabelMultisetTypeFunction<>() )
 				.mapToPair( new AttachBlockPosition<>( blockSize ) )
 				.map( new ConvertToDataBlock() )
 				.foreach( new WriteBlock<>( outputGroupName, outputDatasetName, dimensions, blockSize, DataType.UINT8, gson.toJson( compression ) ) );

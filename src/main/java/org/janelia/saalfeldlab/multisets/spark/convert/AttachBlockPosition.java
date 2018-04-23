@@ -1,4 +1,4 @@
-package bdv.bigcat.util;
+package org.janelia.saalfeldlab.multisets.spark.convert;
 
 import org.apache.spark.api.java.function.PairFunction;
 
@@ -20,7 +20,7 @@ public class AttachBlockPosition< I extends Interval > implements PairFunction< 
 	@Override
 	public Tuple2< long[], I > call( final I interval ) throws Exception
 	{
-		final long[] pos = HDFConverter.blockPos( Intervals.minAsLongArray( interval ), blockSize );
+		final long[] pos = ConvertToLabelMultisetType.blockPos( Intervals.minAsLongArray( interval ), blockSize );
 		return new Tuple2<>( pos, interval );
 	}
 

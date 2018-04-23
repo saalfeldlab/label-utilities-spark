@@ -1,4 +1,4 @@
-package bdv.bigcat.util;
+package org.janelia.saalfeldlab.multisets.spark.convert;
 
 import org.apache.spark.api.java.function.VoidFunction;
 import org.janelia.saalfeldlab.n5.Compression;
@@ -47,7 +47,7 @@ public class WriteBlock< T, B extends DataBlock< T > > implements VoidFunction< 
 	@Override
 	public void call( final B block ) throws Exception
 	{
-		final N5Writer writer = HDFConverter.n5Writer( group, blockSize );
+		final N5Writer writer = ConvertToLabelMultisetType.n5Writer( group, blockSize );
 		final Gson gson = new GsonBuilder()
 				.registerTypeHierarchyAdapter( Compression.class, CompressionAdapter.getJsonAdapter() )
 				.create();

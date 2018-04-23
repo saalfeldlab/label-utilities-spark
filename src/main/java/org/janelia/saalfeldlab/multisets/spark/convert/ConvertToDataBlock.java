@@ -1,4 +1,4 @@
-package bdv.bigcat.util;
+package org.janelia.saalfeldlab.multisets.spark.convert;
 
 import org.apache.spark.api.java.function.Function;
 import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
@@ -13,7 +13,7 @@ public class ConvertToDataBlock implements Function< Tuple2< long[], RandomAcces
 	@Override
 	public ByteArrayDataBlock call( final Tuple2< long[], RandomAccessibleInterval< LabelMultisetType > > block ) throws Exception
 	{
-		return HDFConverter.toDataBlock( block._2(), block._1() );
+		return ConvertToLabelMultisetType.toDataBlock( block._2(), block._1() );
 	}
 
 }

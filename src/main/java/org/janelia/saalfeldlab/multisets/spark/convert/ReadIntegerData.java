@@ -1,4 +1,4 @@
-package bdv.bigcat.util;
+package org.janelia.saalfeldlab.multisets.spark.convert;
 
 import java.io.IOException;
 
@@ -34,7 +34,7 @@ public class ReadIntegerData< I extends IntegerType< I > & NativeType< I > > imp
 		try
 		{
 			return Views.interval(
-					( RandomAccessibleInterval< I > ) N5Utils.open( HDFConverter.n5Reader( group, defaultBlockSize ), dataset ),
+					( RandomAccessibleInterval< I > ) N5Utils.open( ConvertToLabelMultisetType.n5Reader( group, defaultBlockSize ), dataset ),
 					interval );
 		}
 		catch ( final IOException e )
