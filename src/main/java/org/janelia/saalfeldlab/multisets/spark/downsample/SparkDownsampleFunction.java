@@ -147,7 +147,9 @@ public class SparkDownsampleFunction implements VoidFunction< Interval >
 		final LoaderCacheAsCacheAdapter< Long, Cell< VolatileLabelMultisetArray > > wrappedCache = new LoaderCacheAsCacheAdapter<>( cache, cacheLoader );
 
 		final CachedCellImg< LabelMultisetType, VolatileLabelMultisetArray > source = new CachedCellImg<>(
-				new CellGrid( dimensions, blockSize ), new LabelMultisetType(), wrappedCache, new VolatileLabelMultisetArray( 0, true ) );
+				new CellGrid( dimensions, blockSize ), new LabelMultisetType().getEntitiesPerPixel(), wrappedCache, new VolatileLabelMultisetArray( 0, true ) );
+		final LabelMultisetType linkedType = new LabelMultisetType( source );
+		source.setLinkedType( linkedType );
 		return source;
 	}
 }
