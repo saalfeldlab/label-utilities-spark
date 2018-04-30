@@ -8,7 +8,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.stream.DoubleStream;
@@ -30,6 +32,7 @@ import org.slf4j.LoggerFactory;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
 
 import picocli.CommandLine;
 import picocli.CommandLine.Option;
@@ -112,7 +115,8 @@ public class SparkDownsampler
 					throw new IllegalArgumentException( "Got illegal downscaling factors: " + Arrays.toString( factors[ i ] ) );
 				}
 
-			addMultiScaleTag( new N5FSWriter( n5 ), multiscaleGroup );
+			final N5FSWriter writer = new N5FSWriter( n5 );
+			addMultiScaleTag( writer, multiscaleGroup );
 
 			final SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
@@ -133,6 +137,15 @@ public class SparkDownsampler
 					}
 				}
 				int lastMaxNumEntries = -1;
+
+				final String finestScale = Paths.get( multiscaleGroup, "s0" ).toString();
+				final HashMap< String, JsonElement > attributeNames = writer.getAttributes( finestScale );
+				Arrays.asList( "dataType", "compression", "blockSize", "dimensions" ).forEach( attributeNames::remove );
+				for ( final Entry< String, JsonElement > entry : attributeNames.entrySet() )
+				{
+					writer.setAttribute( multiscaleGroup, entry.getKey(), entry.getValue() );
+				}
+
 				for ( int factorIndex = 0, level = 1; factorIndex < factors.length; ++factorIndex, ++level )
 				{
 					final String previousScaleLevel = multiscaleGroup + "/s" + ( level - 1 );
