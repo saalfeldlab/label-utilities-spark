@@ -112,7 +112,7 @@ public class SparkDownsampler
 					throw new IllegalArgumentException( "Got illegal downscaling factors: " + Arrays.toString( factors[ i ] ) );
 				}
 
-			addMultiScaleTage( new N5FSWriter( n5 ), multiscaleGroup );
+			addMultiScaleTag( new N5FSWriter( n5 ), multiscaleGroup );
 
 			final SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
@@ -293,7 +293,7 @@ public class SparkDownsampler
 		return true;
 	}
 
-	public static void addMultiScaleTage( final N5Writer n5, final String group ) throws IOException
+	public static void addMultiScaleTag( final N5Writer n5, final String group ) throws IOException
 	{
 		if ( !n5.exists( group ) )
 			n5.createGroup( group );
