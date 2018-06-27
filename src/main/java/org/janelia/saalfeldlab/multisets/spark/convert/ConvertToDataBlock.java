@@ -1,19 +1,18 @@
 package org.janelia.saalfeldlab.multisets.spark.convert;
 
-import org.apache.spark.api.java.function.Function;
+import org.apache.spark.api.java.function.PairFunction;
+import org.janelia.saalfeldlab.multisets.spark.convert.ConvertToLabelMultisetTypeFunction.ConvertedIntervalWithMaxId;
 import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
 
-import net.imglib2.RandomAccessibleInterval;
-import net.imglib2.type.label.LabelMultisetType;
 import scala.Tuple2;
 
-public class ConvertToDataBlock implements Function< Tuple2< long[], RandomAccessibleInterval< LabelMultisetType > >, ByteArrayDataBlock >
+public class ConvertToDataBlock implements PairFunction< Tuple2< long[], ConvertedIntervalWithMaxId >, ByteArrayDataBlock, Long >
 {
 
 	@Override
-	public ByteArrayDataBlock call( final Tuple2< long[], RandomAccessibleInterval< LabelMultisetType > > block ) throws Exception
+	public Tuple2< ByteArrayDataBlock, Long > call( final Tuple2< long[], ConvertedIntervalWithMaxId > block ) throws Exception
 	{
-		return ConvertToLabelMultisetType.toDataBlock( block._2(), block._1() );
+		return new Tuple2<>( ConvertToLabelMultisetType.toDataBlock( block._2().data, block._1() ), block._2().maxId );
 	}
 
 }

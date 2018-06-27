@@ -1,12 +1,13 @@
 package org.janelia.saalfeldlab.multisets.spark.convert;
 
 import org.apache.spark.api.java.function.PairFunction;
+import org.janelia.saalfeldlab.multisets.spark.convert.ConvertToLabelMultisetTypeFunction.ConvertedIntervalWithMaxId;
 
-import net.imglib2.Interval;
 import net.imglib2.util.Intervals;
 import scala.Tuple2;
 
-public class AttachBlockPosition< I extends Interval > implements PairFunction< I, long[], I >
+public class AttachBlockPosition implements
+		PairFunction< ConvertedIntervalWithMaxId, long[], ConvertedIntervalWithMaxId >
 {
 
 	private final int[] blockSize;
@@ -18,9 +19,9 @@ public class AttachBlockPosition< I extends Interval > implements PairFunction< 
 	}
 
 	@Override
-	public Tuple2< long[], I > call( final I interval ) throws Exception
+	public Tuple2< long[], ConvertedIntervalWithMaxId > call( final ConvertedIntervalWithMaxId interval ) throws Exception
 	{
-		final long[] pos = ConvertToLabelMultisetType.blockPos( Intervals.minAsLongArray( interval ), blockSize );
+		final long[] pos = ConvertToLabelMultisetType.blockPos( Intervals.minAsLongArray( interval.data ), blockSize );
 		return new Tuple2<>( pos, interval );
 	}
 
