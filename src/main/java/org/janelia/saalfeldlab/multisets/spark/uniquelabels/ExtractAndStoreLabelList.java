@@ -1,6 +1,7 @@
 package org.janelia.saalfeldlab.multisets.spark.uniquelabels;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 import org.apache.spark.api.java.function.VoidFunction;
 import org.janelia.saalfeldlab.n5.DataType;
@@ -82,12 +83,18 @@ public class ExtractAndStoreLabelList implements VoidFunction< Tuple2< long[], l
 		{
 			uniqueLabels.add( val.getIntegerLong() );
 		}
+		final long[] pos = Intervals.minAsLongArray( interval );
+		Arrays.setAll( pos, d -> pos[ d ] / blockSize[ d ] );
 		final LongArrayDataBlock block = new LongArrayDataBlock(
 				Intervals.dimensionsAsIntArray( interval ),
-				Intervals.minAsLongArray( interval ),
+				pos,
 				uniqueLabels.toArray() );
 		final N5Writer n5writer = ExtractUniqueLabelsPerBlock.n5Writer( outputN5, blockSize );
-		final DatasetAttributes attributes = new DatasetAttributes( grid.getImgDimensions(), blockSize, DataType.UINT16, new GzipCompression() );
+		final DatasetAttributes attributes = new DatasetAttributes(
+				grid.getImgDimensions(),
+				blockSize,
+				DataType.UINT64,
+				new GzipCompression() );
 		n5writer.writeBlock( outputDataset, attributes, block );
 	}
 
