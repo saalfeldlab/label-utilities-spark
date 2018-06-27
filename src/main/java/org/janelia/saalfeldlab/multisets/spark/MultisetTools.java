@@ -8,6 +8,7 @@ import org.janelia.saalfeldlab.multisets.spark.MultisetTools.Tool.FromString;
 import org.janelia.saalfeldlab.multisets.spark.convert.ConvertToLabelMultisetType;
 import org.janelia.saalfeldlab.multisets.spark.downsample.SparkDownsampler;
 import org.janelia.saalfeldlab.multisets.spark.uniquelabels.ExtractUniqueLabelsPerBlock;
+import org.janelia.saalfeldlab.multisets.spark.uniquelabels.downsample.LabelListDownsampler;
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -22,7 +23,8 @@ public class MultisetTools
 	{
 		CONVERT( ConvertToLabelMultisetType::run ),
 		DOWNSAMPLE( SparkDownsampler::run ),
-		EXTRACT_UNIQUE_LABELS( ExtractUniqueLabelsPerBlock::run );
+		EXTRACT_UNIQUE_LABELS( ExtractUniqueLabelsPerBlock::run ),
+		DOWNSAMPLE_UNIQUE_LABELS( LabelListDownsampler::run );
 
 		private interface ExceptionConsumer< T >
 		{
