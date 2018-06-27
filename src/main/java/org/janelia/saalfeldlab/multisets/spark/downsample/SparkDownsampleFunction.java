@@ -11,7 +11,6 @@ import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 
-import gnu.trove.set.hash.TLongHashSet;
 import net.imglib2.Interval;
 import net.imglib2.RandomAccess;
 import net.imglib2.algorithm.util.Grids;
@@ -96,14 +95,12 @@ public class SparkDownsampleFunction implements VoidFunction< Interval >
 				blockMaxInSource,
 				sourceCellDimensions );
 
-		final TLongHashSet containedLabels = new TLongHashSet();
 		final LazyCells< Cell< VolatileLabelMultisetArray > > cells = source.getCells();
 		final RandomAccess< Cell< VolatileLabelMultisetArray > > cellsAccess = cells.randomAccess();
 		for ( final long[] pos : cellPositions )
 		{
 			Arrays.setAll( pos, d -> pos[ d ] / sourceCellDimensions[ d ] );
 			cellsAccess.setPosition( pos );
-			containedLabels.addAll( cellsAccess.get().getData().containedLabels() );
 		}
 		source.getCellGrid();
 
@@ -126,7 +123,6 @@ public class SparkDownsampleFunction implements VoidFunction< Interval >
 				.createDownscaledCell(
 						Views.offsetInterval( source, blockMinInSource, blockSizeInSource ),
 						factor,
-						containedLabels,
 						maxNumEntries );
 
 		final byte[] bytes = new byte[ LabelMultisetTypeDownscaler.getSerializedVolatileLabelMultisetArraySize( downscaledCell ) ];
