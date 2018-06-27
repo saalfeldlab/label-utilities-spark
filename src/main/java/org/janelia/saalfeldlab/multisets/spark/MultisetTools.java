@@ -7,6 +7,7 @@ import java.util.concurrent.Callable;
 import org.janelia.saalfeldlab.multisets.spark.MultisetTools.Tool.FromString;
 import org.janelia.saalfeldlab.multisets.spark.convert.ConvertToLabelMultisetType;
 import org.janelia.saalfeldlab.multisets.spark.downsample.SparkDownsampler;
+import org.janelia.saalfeldlab.multisets.spark.uniquelabels.ExtractUniqueLabelsPerBlock;
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -20,7 +21,8 @@ public class MultisetTools
 	public static enum Tool
 	{
 		CONVERT( ConvertToLabelMultisetType::run ),
-		DOWNSAMPLE( SparkDownsampler::run );
+		DOWNSAMPLE( SparkDownsampler::run ),
+		EXTRACT_UNIQUE_LABELS( ExtractUniqueLabelsPerBlock::run );
 
 		private interface ExceptionConsumer< T >
 		{
@@ -41,7 +43,7 @@ public class MultisetTools
 
 		public static Tool fromCmdLineRepresentation( final String representation )
 		{
-			return Tool.valueOf( representation.toUpperCase() );
+			return Tool.valueOf( representation.replace( "-", "_" ).toUpperCase() );
 		}
 
 		public static class FromString implements ITypeConverter< Tool >
