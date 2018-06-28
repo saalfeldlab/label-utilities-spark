@@ -8,6 +8,7 @@ import org.janelia.saalfeldlab.multisets.spark.MultisetTools.Tool.FromString;
 import org.janelia.saalfeldlab.multisets.spark.convert.ConvertToLabelMultisetType;
 import org.janelia.saalfeldlab.multisets.spark.downsample.SparkDownsampler;
 import org.janelia.saalfeldlab.multisets.spark.uniquelabels.ExtractUniqueLabelsPerBlock;
+import org.janelia.saalfeldlab.multisets.spark.uniquelabels.LabelToBlockMapping;
 import org.janelia.saalfeldlab.multisets.spark.uniquelabels.downsample.LabelListDownsampler;
 
 import picocli.CommandLine;
@@ -24,7 +25,8 @@ public class MultisetTools
 		CONVERT( ConvertToLabelMultisetType::run ),
 		DOWNSAMPLE( SparkDownsampler::run ),
 		EXTRACT_UNIQUE_LABELS( ExtractUniqueLabelsPerBlock::run ),
-		DOWNSAMPLE_UNIQUE_LABELS( LabelListDownsampler::run );
+		DOWNSAMPLE_UNIQUE_LABELS( LabelListDownsampler::run ),
+		LABEL_TO_BLOCK_MAPPING( LabelToBlockMapping::run );
 
 		private interface ExceptionConsumer< T >
 		{
@@ -69,7 +71,7 @@ public class MultisetTools
 				index = "0",
 				paramLabel = "TOOL",
 				converter = FromString.class,
-				description = "Tool to run. Run multiset-tools <TOOL> --help/-h for specific help message. Current options are convert, downsample, extract-unique-labels, downsample-unique-labels" )
+				description = "Tool to run. Run multiset-tools <TOOL> --help/-h for specific help message. Current options are convert, downsample, extract-unique-labels, downsample-unique-labels, label-to-block-mapping" )
 		private Tool tool;
 
 		@Option( names = { "-h", "--help" }, usageHelp = true, description = "display a help message" )
