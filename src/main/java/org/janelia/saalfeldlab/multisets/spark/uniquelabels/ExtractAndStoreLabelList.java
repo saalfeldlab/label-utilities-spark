@@ -19,7 +19,6 @@ import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.cell.Cell;
 import net.imglib2.img.cell.CellGrid;
-import net.imglib2.type.NativeType;
 import net.imglib2.type.label.LabelMultisetType;
 import net.imglib2.type.label.N5CacheLoader;
 import net.imglib2.type.label.VolatileLabelMultisetArray;
@@ -98,7 +97,7 @@ public class ExtractAndStoreLabelList implements VoidFunction< Tuple2< long[], l
 		n5writer.writeBlock( outputDataset, attributes, block );
 	}
 
-	private static < I extends NativeType< I > & IntegerType< I > > RandomAccessibleInterval< I > getData(
+	private static < I extends IntegerType< I > > RandomAccessibleInterval< I > getData(
 			final Interval interval,
 			final int[] blockSize,
 			final CellGrid grid,
@@ -117,14 +116,14 @@ public class ExtractAndStoreLabelList implements VoidFunction< Tuple2< long[], l
 					Intervals.dimensionsAsLongArray( interval ),
 					new LabelMultisetType().getEntitiesPerPixel() );
 			arrayImg.setLinkedType( new LabelMultisetType( arrayImg ) );
-			@SuppressWarnings( "unchecked" )
-			final RandomAccessibleInterval< I > img2 = ( RandomAccessibleInterval< I > ) arrayImg;
+			@SuppressWarnings( { "unchecked", "rawtypes" } )
+			final RandomAccessibleInterval< I > img2 = ( RandomAccessibleInterval ) arrayImg;
 			img = img2;
 		}
 		else
 		{
 			img = Views.interval(
-					N5Utils.< I >open( n5reader, inputDataset ),
+					( RandomAccessibleInterval< I > ) N5Utils.open( n5reader, inputDataset ),
 					interval );
 		}
 		return img;
