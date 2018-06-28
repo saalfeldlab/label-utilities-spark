@@ -15,11 +15,71 @@
 
 	<name>N5-Label-Multisets-Spark</name>
 	<description>Spark based tools for n5 label multisets.</description>
+    <url>https://github.com/saalfeldlab/n5-label-multisets-spark</url>
+    <inceptionYear>2018</inceptionYear>
+    <!-- <organization>saalfeldlab</organization> -->
+	<organization>
+		<name>Saalfeld Lab</name>
+		<url>http://saalfeldlab.janelia.org/</url>
+	</organization>
+	<licenses>
+		<license>
+			<name>Simplified BSD License</name>
+			<distribution>repo</distribution>
+		</license>
+	</licenses>
+
+	<mailingLists>
+		<mailingList>
+			<name>ImageJ Forum</name>
+			<archive>http://forum.imagej.net/</archive>
+		</mailingList>
+	</mailingLists>
+
+    <developers>
+		<developer>
+			<id>hanslovsky</id>
+			<name>Philipp Hanslovsky</name>
+			<url>http://imagej.net/User:Hanslovsky</url>
+			<roles>
+				<role>founder</role>
+				<role>lead</role>
+				<role>developer</role>
+				<role>debugger</role>
+				<role>reviewer</role>
+				<role>support</role>
+				<role>maintainer</role>
+			</roles>
+		</developer>
+	</developers>
+
+    <contributors>
+      <contributor>
+        <name>Philipp Hanslovsky</name>
+		<url>http://imagej.net/User:Hanslovsky</url>
+        <properties><id>hanslovsky</id></properties>
+      </contributor>
+    </contributors>
+
+    <scm>
+		<connection>scm:git:git://github.com/saalfeldlab/n5-label-multisets-spark</connection>
+		<developerConnection>scm:git:git@github.com:saalfeldlab/n5-label-multisets-spark</developerConnection>
+		<tag>HEAD</tag>
+		<url>https://github.com/saalfeldlab/n5-label-multisets-spark</url>
+	</scm>
+	<issueManagement>
+		<system>GitHub Issues</system>
+		<url>https://github.com/saalfeldlab/n5-label-multisets-spark/issues</url>
+	</issueManagement>
+	<ciManagement></ciManagement>
 
 
 	<properties>
 		<scijava.jvm.version>1.8</scijava.jvm.version>
         <allowedDuplicateClasses>*</allowedDuplicateClasses>
+
+        <license.licenseName>bsd_2</license.licenseName>
+		<license.copyrightOwners>Stephan Saalfeld</license.copyrightOwners>
 	</properties>
 
 	<repositories>
