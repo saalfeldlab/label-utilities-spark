@@ -12,6 +12,10 @@ import java.util.stream.Collectors;
 import org.apache.commons.lang.time.DurationFormatUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.janelia.saalfeldlab.multisets.spark.exception.InputSameAsOutput;
+import org.janelia.saalfeldlab.multisets.spark.exception.InvalidDataType;
+import org.janelia.saalfeldlab.multisets.spark.exception.InvalidDataset;
+import org.janelia.saalfeldlab.multisets.spark.exception.InvalidN5Container;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
@@ -25,7 +29,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.imglib2.algorithm.util.Grids;
-import net.imglib2.img.cell.CellGrid;
 import net.imglib2.util.Intervals;
 import picocli.CommandLine;
 import picocli.CommandLine.Option;
@@ -40,38 +43,6 @@ public class ExtractUniqueLabelsPerBlock
 	public static final String LABEL_MULTISETTYPE_KEY = "isLabelMultiset";
 
 	public static final int DEFAULT_BLOCK_SIZE = 64;
-
-	public static class InvalidN5Container extends Exception
-	{
-		public InvalidN5Container( final String containerIdentifier, final String n5Container )
-		{
-			super( "N5 container for " + containerIdentifier + " invalid: " + n5Container );
-		}
-	}
-
-	public static class InvalidDataset extends Exception
-	{
-		public InvalidDataset( final String datasetIdentifier, final String dataset )
-		{
-			super( "Invalid dataset for " + datasetIdentifier + ": " + dataset );
-		}
-	}
-
-	public static class InputSameAsOutput extends Exception
-	{
-		public InputSameAsOutput( final String n5Container, final String dataset )
-		{
-			super( "Input and output both point to dataset " + dataset + " in container " + n5Container );
-		}
-	}
-
-	public static class InvalidDataType extends Exception
-	{
-		public InvalidDataType( final DataType dataType )
-		{
-			super( "Only (unsigned) integer or LabelMultisetType data supported. Got: " + dataType );
-		}
-	}
 
 	// TODO make this parallizable/spark and not hdf-to-n5 but convert between
 	// various instances of n5 instead
@@ -136,14 +107,13 @@ public class ExtractUniqueLabelsPerBlock
 			// compress very well
 			final DatasetAttributes outputAttributes = new DatasetAttributes( dims, blockSize, DataType.UINT64, new GzipCompression() );
 			writer.createDataset( this.outputDatasetName, outputAttributes );
-			final CellGrid grid = new CellGrid( dims, blockSize );
 
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
 				final List< Tuple2< long[], long[] > > intervals = Grids
 						.collectAllContainedIntervals( dims, blockSize )
 						.stream()
-						.map( i -> new Tuple2( Intervals.minAsLongArray( i ), Intervals.maxAsLongArray( i ) ) )
+						.map( i -> new Tuple2<>( Intervals.minAsLongArray( i ), Intervals.maxAsLongArray( i ) ) )
 						.collect( Collectors.toList() );
 				sc
 						.parallelize( intervals )
