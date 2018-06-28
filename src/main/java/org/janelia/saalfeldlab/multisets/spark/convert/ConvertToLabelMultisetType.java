@@ -1,9 +1,11 @@
 package org.janelia.saalfeldlab.multisets.spark.convert;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -14,6 +16,7 @@ import java.util.stream.IntStream;
 import org.apache.commons.lang.time.DurationFormatUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.janelia.saalfeldlab.multisets.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
 import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.CompressionAdapter;
@@ -57,6 +60,8 @@ public class ConvertToLabelMultisetType
 	public static final String BLOCK_SIZE_KEY = "blockSize";
 
 	public static final String DIMENSIONS_KEY = "dimensions";
+
+	public static final String MAX_ID_KEY = N5Helpers.MAX_ID_KEY;
 
 	public static final int DEFAULT_BLOCK_SIZE = 64;
 
@@ -110,7 +115,7 @@ public class ConvertToLabelMultisetType
 
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
-				convertHDF5toN5(
+				convertToLabelMultisetType(
 						sc,
 						inputN5,
 						inputDataset,
@@ -145,7 +150,7 @@ public class ConvertToLabelMultisetType
 
 	}
 
-	public static < I extends IntegerType< I > & NativeType< I > > void convertHDF5toN5(
+	public static < I extends IntegerType< I > & NativeType< I > > void convertToLabelMultisetType(
 			final JavaSparkContext sc,
 			final String inputGroup,
 			final String inputDataset,
@@ -175,7 +180,9 @@ public class ConvertToLabelMultisetType
 		writer.createDataset( outputDatasetName, dimensions, blockSize, DataType.UINT8, compression );
 		writer.setAttribute( outputDatasetName, LABEL_MULTISETTYPE_KEY, true );
 		for ( final Entry< String, Class< ? > > entry : attributeNames.entrySet() )
+		{
 			writer.setAttribute( outputDatasetName, entry.getKey(), revertInplaceAndReturn( reader.getAttribute( inputDataset, entry.getKey(), entry.getValue() ), revert ) );
+		}
 
 		final List< long[] > offsets = new ArrayList<>();
 
@@ -190,9 +197,13 @@ public class ConvertToLabelMultisetType
 			{
 				min[ dim ] += blockSize[ dim ];
 				if ( min[ dim ] < dimensions[ dim ] )
+				{
 					break;
+				}
 				else
+				{
 					min[ dim ] = 0;
+				}
 			}
 		}
 
@@ -201,14 +212,16 @@ public class ConvertToLabelMultisetType
 				.registerTypeHierarchyAdapter( Compression.class, CompressionAdapter.getJsonAdapter() )
 				.create();
 
-		sc
+		final long maxId = sc
 				.parallelize( offsets )
 				.map( new ToInterval( dimensions, blockSize ) )
 				.map( new ReadIntegerData< I >( inputGroup, inputDataset, blockSize ) )
 				.map( new ConvertToLabelMultisetTypeFunction<>() )
-				.mapToPair( new AttachBlockPosition<>( blockSize ) )
-				.map( new ConvertToDataBlock() )
-				.foreach( new WriteBlock<>( outputGroupName, outputDatasetName, dimensions, blockSize, DataType.UINT8, gson.toJson( compression ) ) );
+				.mapToPair( new AttachBlockPosition( blockSize ) )
+				.mapToPair( new ConvertToDataBlock() )
+				.map( new WriteBlock<>( outputGroupName, outputDatasetName, dimensions, blockSize, DataType.UINT8, gson.toJson( compression ) ) )
+				.max( new LongComparator() );
+		writer.setAttribute( outputDatasetName, MAX_ID_KEY, maxId );
 
 	}
 
@@ -250,8 +263,7 @@ public class ConvertToLabelMultisetType
 
 	public static < T > T revertInplaceAndReturn( final T t, final boolean revert )
 	{
-		if ( !revert )
-			return t;
+		if ( !revert ) { return t; }
 
 		if ( t instanceof boolean[] )
 		{
@@ -342,5 +354,16 @@ public class ConvertToLabelMultisetType
 		}
 
 		return t;
+	}
+
+	private static final class LongComparator implements Comparator< Long >, Serializable
+	{
+
+		@Override
+		public int compare( final Long o1, final Long o2 )
+		{
+			return Long.compare( o1, o2 );
+		}
+
 	}
 }

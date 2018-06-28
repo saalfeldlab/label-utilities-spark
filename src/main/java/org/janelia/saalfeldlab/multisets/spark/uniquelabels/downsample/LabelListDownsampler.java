@@ -1,10 +1,7 @@
-package org.janelia.saalfeldlab.multisets.spark.downsample;
+package org.janelia.saalfeldlab.multisets.spark.uniquelabels.downsample;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
-import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -19,10 +16,12 @@ import java.util.stream.Stream;
 
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.janelia.saalfeldlab.multisets.spark.downsample.MinToInterval;
 import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.CompressionAdapter;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
+import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.N5FSReader;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
@@ -38,59 +37,41 @@ import picocli.CommandLine;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-public class SparkDownsampler
+public class LabelListDownsampler
 {
 
 	private static final Logger LOG = LoggerFactory.getLogger( MethodHandles.lookup().lookupClass() );
 
 	private static final String DOWNSAMPLING_FACTORS_KEY = "downsamplingFactors";
 
-	private static final String MAX_NUM_ENTRIES_KEY = "maxNumEntries";
-
 	private static final String MULTI_SCALE_KEY = "multiScale";
 
 	public static class CommandLineParameters implements Callable< Void >
 	{
 
-		@Option( names = { "--n5-root", "-r" }, paramLabel = "ROOT", required = true, description = "Input N5 container" )
+		@Parameters( index = "0", paramLabel = "N5_CONTAINER", description = "Input N5 container" )
 		private String n5;
 
-		@Option( names = { "--group", "-g" }, paramLabel = "MULTISCALE_GROUP", required = true, description = "Multi scale group(relative to N5). Must contain dataset s0 for first scale level unless --link-mipmap-level-zero is specified." )
+		@Parameters( index = "1", paramLabel = "MULTISCALE_GROUP", description = "Multi scale group(relative to N5). Must contain dataset s0 for first scale level." )
 		private String multiscaleGroup;
 
-		@Parameters( arity = "1..*", paramLabel = "FACTOR", description = "Factor by which to downscale the input image. Factors are relative to the previous level, not to level zero. Format either fx,fy,fz or f" )
+		@Parameters( index = "2", arity = "1..*", paramLabel = "FACTOR", description = "Factor by which to downscale the input image. Factors are relative to the previous level, not to level zero. Format either fx,fy,fz or f" )
 		private String[] factors;
 
 		@Option( names = { "--block-size", "-b" }, paramLabel = "BLOCK_SIZE", description = "Size of the blocks (in cells) to parallelize with Spark. Format either bx,by,bz or b" )
 		private String[] blockSize;
 
-		@Option(
-				names = { "--max-num-entries", "-m" },
-				required = false,
-				split = ",",
-				description = "Maximum number of multiset entries at each pixels. Values smaller than 1 do not limit the number of entries. Defaults to previous level if not specified. Defaults to -1 for the first level if not specified" )
-		private int[] maxNumEntries;
-
-		@Option( names = { "--compression", "-c" }, paramLabel = "COMPRESSION", description = "Compression type to use in output N5 dataset" )
-		public String compressionType = "{\"type\":\"gzip\",\"level\":\"-1\"}";
-
 		@Option( names = { "-h", "--help" }, usageHelp = true, description = "display a help message" )
 		private boolean helpRequested;
 
-		@Option( names = { "--link-mipmap-level-zero", "-l" }, paramLabel = "PATH_TO_S0", required = false )
-		public String pathToMipmapLevelZero;
-
-//		@Option( names = { "--copy-original-dataset", "-C" }, description = "Create a copy of the original data set for the first mipmap level. A symlink is created by default" )
-//		private boolean copyDataset;
-
 		public int[][] getFactors()
 		{
-			return Arrays.stream( factors ).map( SparkDownsampler::toIntegerArray ).toArray( int[][]::new );
+			return Arrays.stream( factors ).map( LabelListDownsampler::toIntegerArray ).toArray( int[][]::new );
 		}
 
 		public int[][] getBlockSizes()
 		{
-			return Arrays.stream( blockSize ).map( SparkDownsampler::toIntegerArray ).toArray( int[][]::new );
+			return Arrays.stream( blockSize ).map( LabelListDownsampler::toIntegerArray ).toArray( int[][]::new );
 		}
 
 		@Override
@@ -98,7 +79,6 @@ public class SparkDownsampler
 		{
 			LOG.warn( "Will downsample with these factors: {}", Arrays.toString( factors ) );
 			blockSize = blockSize == null ? new String[ 0 ] : blockSize;
-			maxNumEntries = maxNumEntries == null ? new int[] { -1 } : maxNumEntries;
 			final String defaultBlockSize = Arrays.stream( blockSize ).limit( factors.length ).reduce( ( f, s ) -> s ).orElse( "64" );
 			blockSize = Stream.concat(
 					Arrays.stream( blockSize ).limit( factors.length ),
@@ -106,7 +86,6 @@ public class SparkDownsampler
 			LOG.debug( "Block sizes: {}", Arrays.toString( blockSize ) );
 			final int[][] factors = getFactors();
 			final int[][] blockSizes = getBlockSizes();
-			final Compression compression = fromString( compressionType );
 
 			for ( int i = 0; i < factors.length; ++i )
 			{
@@ -120,7 +99,8 @@ public class SparkDownsampler
 			final SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
-				downsampleMultiscale( sc, defaultBlockSize, defaultBlockSize, factors, blockSizes, maxNumEntries, compression, defaultBlockSize );
+
+				donwsampleMultiscale( sc, n5, multiscaleGroup, factors, blockSizes );
 			}
 
 			return null;
@@ -128,95 +108,41 @@ public class SparkDownsampler
 
 	}
 
-	public static void main( final String[] args ) throws IOException
-	{
-		run( args );
-	}
-
 	public static void run( final String[] args ) throws IOException
 	{
 		CommandLine.call( new CommandLineParameters(), System.err, args );
 	}
 
-	public static void downsampleMultiscale(
+	public static void donwsampleMultiscale(
 			final JavaSparkContext sc,
 			final String n5,
 			final String multiscaleGroup,
 			final int[][] factors,
-			final int[][] blockSizes,
-			final int[] maxNumEntriesArray,
-			final Compression compression ) throws IOException
+			final int[][] blockSizes ) throws IOException
 	{
-		downsampleMultiscale( sc, n5, multiscaleGroup, factors, blockSizes, maxNumEntriesArray, compression, null );
-	}
-
-	public static void downsampleMultiscale(
-			final JavaSparkContext sc,
-			final String n5,
-			final String multiscaleGroup,
-			final int[][] factors,
-			final int[][] blockSizes,
-			final int[] maxNumEntriesArray,
-			final Compression compression,
-			final String pathToMipmapLevelZero ) throws IOException
-	{
-		for ( int i = 0; i < factors.length; ++i )
-		{
-			if ( !checkScaleFactors( factors[ i ] ) )
-			{
-				LOG.error( "Got illegal downscaling factors: {}", factors[ i ] );
-				throw new IllegalArgumentException( "Got illegal downscaling factors: " + Arrays.toString( factors[ i ] ) );
-			}
-		}
-
 		final N5FSWriter writer = new N5FSWriter( n5 );
 		addMultiScaleTag( writer, multiscaleGroup );
-
+		final String finestScale = Paths.get( multiscaleGroup, "s0" ).toString();
+		final HashMap< String, JsonElement > attributeNames = writer.getAttributes( finestScale );
+		Arrays.asList( "dataType", "compression", "blockSize", "dimensions" ).forEach( attributeNames::remove );
+		for ( final Entry< String, JsonElement > entry : attributeNames.entrySet() )
 		{
+			writer.setAttribute( multiscaleGroup, entry.getKey(), entry.getValue() );
+		}
 
-			if ( pathToMipmapLevelZero != null )
-			{
-				final Path linkLocation = Paths.get( n5, multiscaleGroup, "s0" );
-				linkLocation.getParent().toFile().mkdirs();
-				LOG.debug( "Creating link at `{}' pointing to `{}'", linkLocation, pathToMipmapLevelZero );
-				try
-				{
-					Files.createSymbolicLink( linkLocation, Paths.get( pathToMipmapLevelZero ) );
-				}
-				catch ( final FileAlreadyExistsException e )
-				{
-					LOG.warn( "Dataset for mipmap level already exists at {}, will not create symlink!", linkLocation );
-				}
-			}
-			int lastMaxNumEntries = -1;
+		for ( int factorIndex = 0, level = 1; factorIndex < factors.length; ++factorIndex, ++level )
+		{
+			final String previousScaleLevel = multiscaleGroup + "/s" + ( level - 1 );
+			final String currentScaleLevel = multiscaleGroup + "/s" + level;
 
-			final String finestScale = Paths.get( multiscaleGroup, "s0" ).toString();
-			final HashMap< String, JsonElement > attributeNames = writer.getAttributes( finestScale );
-			Arrays.asList( "dataType", "compression", "blockSize", "dimensions" ).forEach( attributeNames::remove );
-			for ( final Entry< String, JsonElement > entry : attributeNames.entrySet() )
-			{
-				writer.setAttribute( multiscaleGroup, entry.getKey(), entry.getValue() );
-			}
-
-			for ( int factorIndex = 0, level = 1; factorIndex < factors.length; ++factorIndex, ++level )
-			{
-				final String previousScaleLevel = multiscaleGroup + "/s" + ( level - 1 );
-				final String currentScaleLevel = multiscaleGroup + "/s" + level;
-
-				final int maxNumEntries = factorIndex < maxNumEntriesArray.length ? maxNumEntriesArray[ factorIndex ] : lastMaxNumEntries;
-				lastMaxNumEntries = maxNumEntries;
-
-				SparkDownsampler.downsample( sc,
-						new N5FSReader( n5 ),
-						n5,
-						previousScaleLevel,
-						factors[ factorIndex ],
-						blockSizes[ factorIndex ],
-						n5,
-						currentScaleLevel,
-						compression,
-						maxNumEntries );
-			}
+			LabelListDownsampler.downsample( sc,
+					new N5FSReader( n5 ),
+					n5,
+					previousScaleLevel,
+					factors[ factorIndex ],
+					blockSizes[ factorIndex ],
+					n5,
+					currentScaleLevel );
 		}
 	}
 
@@ -227,9 +153,7 @@ public class SparkDownsampler
 			final int[] downsampleFactor,
 			final int[] blockSize,
 			final String outputGroupName,
-			final String outputDatasetName,
-			final Compression compression,
-			final int maxNumEntries ) throws IOException
+			final String outputDatasetName ) throws IOException
 	{
 
 		final DatasetAttributes attributes = reader.getDatasetAttributes( readDatasetName );
@@ -277,13 +201,17 @@ public class SparkDownsampler
 				.ofNullable( reader.getAttribute( readDatasetName, DOWNSAMPLING_FACTORS_KEY, double[].class ) )
 				.orElse( DoubleStream.generate( () -> 1.0 ).limit( nDim ).toArray() );
 		final double[] accumulatedDownsamplingFactor = IntStream.range( 0, nDim ).mapToDouble( d -> previousDownsamplingFactor[ d ] * downsampleFactor[ d ] ).toArray();
-		writer.createDataset( outputDatasetName, downsampledDimensions, blockSize, DataType.UINT8, compression );
+		writer.createDataset( outputDatasetName, downsampledDimensions, blockSize, DataType.UINT64, new GzipCompression() );
 		writer.setAttribute( outputDatasetName, DOWNSAMPLING_FACTORS_KEY, accumulatedDownsamplingFactor );
-		writer.setAttribute( outputDatasetName, MAX_NUM_ENTRIES_KEY, maxNumEntries );
 
 		sc.parallelize( positions )
 				.map( new MinToInterval( max, blockSize ) )
-				.foreach( new SparkDownsampleFunction( readGroupName, readDatasetName, downsampleFactor, outputGroupName, outputDatasetName, maxNumEntries ) );
+				.foreach( new LabelListDownsampleFunction(
+						readGroupName,
+						readDatasetName,
+						downsampleFactor,
+						outputGroupName,
+						outputDatasetName ) );
 
 //		System.out.println( "Across " + positions.size() + " parallelized sections, " + output + " cells were downscaled" );
 	}

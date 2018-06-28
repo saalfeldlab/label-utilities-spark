@@ -11,7 +11,6 @@ import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 
-import gnu.trove.set.hash.TLongHashSet;
 import net.imglib2.Interval;
 import net.imglib2.RandomAccess;
 import net.imglib2.algorithm.util.Grids;
@@ -24,8 +23,8 @@ import net.imglib2.img.cell.CellGrid;
 import net.imglib2.img.cell.LazyCellImg.LazyCells;
 import net.imglib2.type.label.Label;
 import net.imglib2.type.label.LabelMultisetType;
+import net.imglib2.type.label.LabelMultisetType.Entry;
 import net.imglib2.type.label.LabelMultisetTypeDownscaler;
-import net.imglib2.type.label.Multiset.Entry;
 import net.imglib2.type.label.N5CacheLoader;
 import net.imglib2.type.label.VolatileLabelMultisetArray;
 import net.imglib2.util.Intervals;
@@ -96,14 +95,12 @@ public class SparkDownsampleFunction implements VoidFunction< Interval >
 				blockMaxInSource,
 				sourceCellDimensions );
 
-		final TLongHashSet containedLabels = new TLongHashSet();
 		final LazyCells< Cell< VolatileLabelMultisetArray > > cells = source.getCells();
 		final RandomAccess< Cell< VolatileLabelMultisetArray > > cellsAccess = cells.randomAccess();
 		for ( final long[] pos : cellPositions )
 		{
 			Arrays.setAll( pos, d -> pos[ d ] / sourceCellDimensions[ d ] );
 			cellsAccess.setPosition( pos );
-			containedLabels.addAll( cellsAccess.get().getData().containedLabels() );
 		}
 		source.getCellGrid();
 
@@ -111,7 +108,9 @@ public class SparkDownsampleFunction implements VoidFunction< Interval >
 		// block for (almost) all tasks
 		int eachCount = 0;
 		for ( final Entry< Label > e : Util.getTypeFromInterval( source ).entrySet() )
+		{
 			eachCount += e.getCount();
+		}
 
 		// Hopefully, the block size of this is consistent with the size of
 		// blockSizeInTarget
@@ -124,14 +123,15 @@ public class SparkDownsampleFunction implements VoidFunction< Interval >
 				.createDownscaledCell(
 						Views.offsetInterval( source, blockMinInSource, blockSizeInSource ),
 						factor,
-						containedLabels,
 						maxNumEntries );
 
 		final byte[] bytes = new byte[ LabelMultisetTypeDownscaler.getSerializedVolatileLabelMultisetArraySize( downscaledCell ) ];
 		LabelMultisetTypeDownscaler.serializeVolatileLabelMultisetArray( downscaledCell, bytes );
 
 		for ( int i = 0; i < nDim; i++ )
+		{
 			writeLocation[ i ] = blockMinInTarget[ i ] / writerAttributes.getBlockSize()[ i ];
+		}
 
 		final ByteArrayDataBlock dataBlock = new ByteArrayDataBlock( blockSizeInTarget, writeLocation, bytes );
 		writer.writeBlock( outputDatasetName, writerAttributes, dataBlock );
@@ -150,7 +150,7 @@ public class SparkDownsampleFunction implements VoidFunction< Interval >
 				new CellGrid( dimensions, blockSize ),
 				new LabelMultisetType().getEntitiesPerPixel(),
 				wrappedCache,
-				new VolatileLabelMultisetArray( 0, true ) );
+				new VolatileLabelMultisetArray( 0, true, new long[] { Label.INVALID } ) );
 		source.setLinkedType( new LabelMultisetType( source ) );
 		return source;
 	}

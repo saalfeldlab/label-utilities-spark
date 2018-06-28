@@ -18,6 +18,7 @@
 
 	<properties>
 		<scijava.jvm.version>1.8</scijava.jvm.version>
+		<enforcer.skip>true</enforcer.skip>
 	</properties>
 
 	<repositories>
@@ -67,7 +68,7 @@
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>n5-label-multisets</artifactId>
-			<version>0.2.0</version>
+			<version>0.3.0</version>
 		</dependency>
 		<dependency>
 			<groupId>info.picocli</groupId>
@@ -83,14 +84,6 @@
 	<profiles>
 		<profile>
 			<id>fatWithSpark</id>
-			<dependencies>
-				<dependency>
-					<groupId>org.apache.spark</groupId>
-					<artifactId>spark-core_2.11</artifactId>
-					<version>2.0.1</version>
-					<scope>compile</scope>
-				</dependency>
-			</dependencies>
 			<build>
 				<plugins>
 					<plugin>
@@ -143,6 +136,14 @@
 
 		<profile>
 			<id>fat</id>
+			<dependencies>
+				<dependency>
+					<groupId>org.apache.spark</groupId>
+					<artifactId>spark-core_2.11</artifactId>
+					<version>2.1.0</version>
+					<scope>provided</scope>
+				</dependency>
+			</dependencies>
 			<build>
 				<plugins>
 					<plugin>
