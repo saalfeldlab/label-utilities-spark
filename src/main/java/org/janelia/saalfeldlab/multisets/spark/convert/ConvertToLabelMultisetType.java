@@ -115,7 +115,7 @@ public class ConvertToLabelMultisetType
 
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
-				convertHDF5toN5(
+				convertToLabelMultisetType(
 						sc,
 						inputN5,
 						inputDataset,
@@ -150,7 +150,7 @@ public class ConvertToLabelMultisetType
 
 	}
 
-	public static < I extends IntegerType< I > & NativeType< I > > void convertHDF5toN5(
+	public static < I extends IntegerType< I > & NativeType< I > > void convertToLabelMultisetType(
 			final JavaSparkContext sc,
 			final String inputGroup,
 			final String inputDataset,
