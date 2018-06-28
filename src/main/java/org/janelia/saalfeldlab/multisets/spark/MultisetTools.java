@@ -69,7 +69,7 @@ public class MultisetTools
 				index = "0",
 				paramLabel = "TOOL",
 				converter = FromString.class,
-				description = "Tool to run. Run multiset-tools <TOOL> --help/-h for specific help message. Current options are convert, downsample" )
+				description = "Tool to run. Run multiset-tools <TOOL> --help/-h for specific help message. Current options are convert, downsample, extract-unique-labels, downsample-unique-labels" )
 		private Tool tool;
 
 		@Option( names = { "-h", "--help" }, usageHelp = true, description = "display a help message" )

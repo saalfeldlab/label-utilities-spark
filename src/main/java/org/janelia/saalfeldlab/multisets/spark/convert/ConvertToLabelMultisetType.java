@@ -16,6 +16,7 @@ import java.util.stream.IntStream;
 import org.apache.commons.lang.time.DurationFormatUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.janelia.saalfeldlab.multisets.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
 import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.CompressionAdapter;
@@ -60,7 +61,7 @@ public class ConvertToLabelMultisetType
 
 	public static final String DIMENSIONS_KEY = "dimensions";
 
-	public static final String MAX_ID_KEY = "maxId";
+	public static final String MAX_ID_KEY = N5Helpers.MAX_ID_KEY;
 
 	public static final int DEFAULT_BLOCK_SIZE = 64;
 
