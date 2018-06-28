@@ -64,68 +64,14 @@ public class ExtractUniqueLabelsPerBlock
 		@Override
 		public Void call() throws Exception
 		{
-			this.outputN5 = this.outputN5 == null ? this.inputN5 : this.outputN5;
-
-			if ( this.outputN5 == null ) { throw new InvalidN5Container( "OUTPUT_N5", this.outputN5 ); }
-
-			if ( this.inputN5 == null ) { throw new InvalidN5Container( "INPUT_N5", this.inputN5 ); }
-
-			if ( this.inputDataset == null ) { throw new InvalidDataset( "INPUT_DATASET", inputDataset ); }
-
-			if ( this.outputDatasetName == null ) { throw new InvalidDataset( "OUTPUT_DATASET", outputDatasetName ); }
-
-			if ( this.inputN5.equals( this.outputN5 ) && this.inputDataset.equals( this.outputDatasetName ) ) { throw new InputSameAsOutput( this.inputN5, this.inputDataset ); }
-
-			final N5Reader reader = n5Reader( this.inputN5 );
-			final DatasetAttributes inputAttributes = reader.getDatasetAttributes( this.inputDataset );
-			final int[] blockSize = inputAttributes.getBlockSize();
-			final long[] dims = inputAttributes.getDimensions();
-
-			final boolean isMultisetType = Optional
-					.ofNullable( reader.getAttribute( this.inputDataset, LABEL_MULTISETTYPE_KEY, Boolean.class ) )
-					.orElse( false );
-
-			if ( !isMultisetType )
-			{
-				final DataType dataType = inputAttributes.getDataType();
-				switch ( dataType )
-				{
-				case FLOAT32:
-				case FLOAT64:
-					throw new InvalidDataType( dataType );
-				default:
-					break;
-				}
-			}
 
 			final long startTime = System.currentTimeMillis();
 
 			final SparkConf conf = new SparkConf().setAppName( MethodHandles.lookup().lookupClass().getName() );
 
-			final N5Writer writer = n5Writer( this.outputN5, blockSize );
-			// TODO should we actually compress at all? unique lables might not
-			// compress very well
-			final DatasetAttributes outputAttributes = new DatasetAttributes( dims, blockSize, DataType.UINT64, new GzipCompression() );
-			writer.createDataset( this.outputDatasetName, outputAttributes );
-
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
-				final List< Tuple2< long[], long[] > > intervals = Grids
-						.collectAllContainedIntervals( dims, blockSize )
-						.stream()
-						.map( i -> new Tuple2<>( Intervals.minAsLongArray( i ), Intervals.maxAsLongArray( i ) ) )
-						.collect( Collectors.toList() );
-				sc
-						.parallelize( intervals )
-						.foreach(
-								new ExtractAndStoreLabelList(
-										inputN5,
-										outputN5,
-										inputDataset,
-										outputDatasetName,
-										dims,
-										blockSize,
-										isMultisetType ) );
+				extractUniqueLabels( sc, inputN5, outputN5, inputDataset, outputDatasetName );
 			}
 
 			final long endTime = System.currentTimeMillis();
@@ -137,6 +83,68 @@ public class ExtractUniqueLabelsPerBlock
 
 		}
 
+	}
+
+	public static void extractUniqueLabels(
+			final JavaSparkContext sc,
+			final String inputN5,
+			final String outputN5,
+			final String inputDataset,
+			final String outputDataset ) throws InvalidDataType, IOException, InvalidN5Container, InvalidDataset, InputSameAsOutput
+	{
+
+		if ( outputN5 == null ) { throw new InvalidN5Container( "OUTPUT_N5", outputN5 ); }
+
+		if ( inputN5 == null ) { throw new InvalidN5Container( "INPUT_N5", inputN5 ); }
+
+		if ( inputDataset == null ) { throw new InvalidDataset( "INPUT_DATASET", inputDataset ); }
+
+		if ( outputDataset == null ) { throw new InvalidDataset( "OUTPUT_DATASET", outputDataset ); }
+
+		if ( inputN5.equals( outputN5 ) && inputDataset.equals( outputDataset ) ) { throw new InputSameAsOutput( inputN5, inputDataset ); }
+
+		final N5Reader reader = n5Reader( inputN5 );
+		final DatasetAttributes inputAttributes = reader.getDatasetAttributes( inputDataset );
+		final int[] blockSize = inputAttributes.getBlockSize();
+		final long[] dims = inputAttributes.getDimensions();
+
+		final boolean isMultisetType = Optional
+				.ofNullable( reader.getAttribute( inputDataset, LABEL_MULTISETTYPE_KEY, Boolean.class ) )
+				.orElse( false );
+
+		if ( !isMultisetType )
+		{
+			final DataType dataType = inputAttributes.getDataType();
+			switch ( dataType )
+			{
+			case FLOAT32:
+			case FLOAT64:
+				throw new InvalidDataType( dataType );
+			default:
+				break;
+			}
+		}
+
+		final N5Writer writer = n5Writer( outputN5, blockSize );
+		final DatasetAttributes outputAttributes = new DatasetAttributes( dims, blockSize, DataType.UINT64, new GzipCompression() );
+		writer.createDataset( outputDataset, outputAttributes );
+
+		final List< Tuple2< long[], long[] > > intervals = Grids
+				.collectAllContainedIntervals( dims, blockSize )
+				.stream()
+				.map( i -> new Tuple2<>( Intervals.minAsLongArray( i ), Intervals.maxAsLongArray( i ) ) )
+				.collect( Collectors.toList() );
+		sc
+				.parallelize( intervals )
+				.foreach(
+						new ExtractAndStoreLabelList(
+								inputN5,
+								outputN5,
+								inputDataset,
+								outputDataset,
+								dims,
+								blockSize,
+								isMultisetType ) );
 	}
 
 	public static void run( final String... args ) throws IOException
