@@ -96,35 +96,11 @@ public class LabelListDownsampler
 				}
 			}
 
-			final N5FSWriter writer = new N5FSWriter( n5 );
-			addMultiScaleTag( writer, multiscaleGroup );
-
 			final SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
 
-				final String finestScale = Paths.get( multiscaleGroup, "s0" ).toString();
-				final HashMap< String, JsonElement > attributeNames = writer.getAttributes( finestScale );
-				Arrays.asList( "dataType", "compression", "blockSize", "dimensions" ).forEach( attributeNames::remove );
-				for ( final Entry< String, JsonElement > entry : attributeNames.entrySet() )
-				{
-					writer.setAttribute( multiscaleGroup, entry.getKey(), entry.getValue() );
-				}
-
-				for ( int factorIndex = 0, level = 1; factorIndex < factors.length; ++factorIndex, ++level )
-				{
-					final String previousScaleLevel = multiscaleGroup + "/s" + ( level - 1 );
-					final String currentScaleLevel = multiscaleGroup + "/s" + level;
-
-					LabelListDownsampler.downsample( sc,
-							new N5FSReader( n5 ),
-							n5,
-							previousScaleLevel,
-							factors[ factorIndex ],
-							blockSizes[ factorIndex ],
-							n5,
-							currentScaleLevel );
-				}
+				donwsampleMultiscale( sc, n5, multiscaleGroup, factors, blockSizes );
 			}
 
 			return null;
@@ -135,6 +111,39 @@ public class LabelListDownsampler
 	public static void run( final String[] args ) throws IOException
 	{
 		CommandLine.call( new CommandLineParameters(), System.err, args );
+	}
+
+	public static void donwsampleMultiscale(
+			final JavaSparkContext sc,
+			final String n5,
+			final String multiscaleGroup,
+			final int[][] factors,
+			final int[][] blockSizes ) throws IOException
+	{
+		final N5FSWriter writer = new N5FSWriter( n5 );
+		addMultiScaleTag( writer, multiscaleGroup );
+		final String finestScale = Paths.get( multiscaleGroup, "s0" ).toString();
+		final HashMap< String, JsonElement > attributeNames = writer.getAttributes( finestScale );
+		Arrays.asList( "dataType", "compression", "blockSize", "dimensions" ).forEach( attributeNames::remove );
+		for ( final Entry< String, JsonElement > entry : attributeNames.entrySet() )
+		{
+			writer.setAttribute( multiscaleGroup, entry.getKey(), entry.getValue() );
+		}
+
+		for ( int factorIndex = 0, level = 1; factorIndex < factors.length; ++factorIndex, ++level )
+		{
+			final String previousScaleLevel = multiscaleGroup + "/s" + ( level - 1 );
+			final String currentScaleLevel = multiscaleGroup + "/s" + level;
+
+			LabelListDownsampler.downsample( sc,
+					new N5FSReader( n5 ),
+					n5,
+					previousScaleLevel,
+					factors[ factorIndex ],
+					blockSizes[ factorIndex ],
+					n5,
+					currentScaleLevel );
+		}
 	}
 
 	public static void downsample( final JavaSparkContext sc,
