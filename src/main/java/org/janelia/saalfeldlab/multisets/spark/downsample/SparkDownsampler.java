@@ -109,62 +109,18 @@ public class SparkDownsampler
 			final Compression compression = fromString( compressionType );
 
 			for ( int i = 0; i < factors.length; ++i )
+			{
 				if ( !checkScaleFactors( factors[ i ] ) )
 				{
 					LOG.error( "Got illegal downscaling factors: {}", factors[ i ] );
 					throw new IllegalArgumentException( "Got illegal downscaling factors: " + Arrays.toString( factors[ i ] ) );
 				}
-
-			final N5FSWriter writer = new N5FSWriter( n5 );
-			addMultiScaleTag( writer, multiscaleGroup );
+			}
 
 			final SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
-
-				if ( pathToMipmapLevelZero != null )
-				{
-					final Path linkLocation = Paths.get( n5, multiscaleGroup, "s0" );
-					linkLocation.getParent().toFile().mkdirs();
-					LOG.debug( "Creating link at `{}' pointing to `{}'", linkLocation, pathToMipmapLevelZero );
-					try
-					{
-						Files.createSymbolicLink( linkLocation, Paths.get( pathToMipmapLevelZero ) );
-					}
-					catch ( final FileAlreadyExistsException e )
-					{
-						LOG.warn( "Dataset for mipmap level already exists at {}, will not create symlink!", linkLocation );
-					}
-				}
-				int lastMaxNumEntries = -1;
-
-				final String finestScale = Paths.get( multiscaleGroup, "s0" ).toString();
-				final HashMap< String, JsonElement > attributeNames = writer.getAttributes( finestScale );
-				Arrays.asList( "dataType", "compression", "blockSize", "dimensions" ).forEach( attributeNames::remove );
-				for ( final Entry< String, JsonElement > entry : attributeNames.entrySet() )
-				{
-					writer.setAttribute( multiscaleGroup, entry.getKey(), entry.getValue() );
-				}
-
-				for ( int factorIndex = 0, level = 1; factorIndex < factors.length; ++factorIndex, ++level )
-				{
-					final String previousScaleLevel = multiscaleGroup + "/s" + ( level - 1 );
-					final String currentScaleLevel = multiscaleGroup + "/s" + level;
-
-					final int maxNumEntries = factorIndex < this.maxNumEntries.length ? this.maxNumEntries[ factorIndex ] : lastMaxNumEntries;
-					lastMaxNumEntries = maxNumEntries;
-
-					SparkDownsampler.downsample( sc,
-							new N5FSReader( n5 ),
-							n5,
-							previousScaleLevel,
-							factors[ factorIndex ],
-							blockSizes[ factorIndex ],
-							n5,
-							currentScaleLevel,
-							compression,
-							maxNumEntries );
-				}
+				downsampleMultiscale( sc, defaultBlockSize, defaultBlockSize, factors, blockSizes, maxNumEntries, compression, defaultBlockSize );
 			}
 
 			return null;
@@ -180,6 +136,88 @@ public class SparkDownsampler
 	public static void run( final String[] args ) throws IOException
 	{
 		CommandLine.call( new CommandLineParameters(), System.err, args );
+	}
+
+	public static void downsampleMultiscale(
+			final JavaSparkContext sc,
+			final String n5,
+			final String multiscaleGroup,
+			final int[][] factors,
+			final int[][] blockSizes,
+			final int[] maxNumEntriesArray,
+			final Compression compression ) throws IOException
+	{
+		downsampleMultiscale( sc, n5, multiscaleGroup, factors, blockSizes, maxNumEntriesArray, compression, null );
+	}
+
+	public static void downsampleMultiscale(
+			final JavaSparkContext sc,
+			final String n5,
+			final String multiscaleGroup,
+			final int[][] factors,
+			final int[][] blockSizes,
+			final int[] maxNumEntriesArray,
+			final Compression compression,
+			final String pathToMipmapLevelZero ) throws IOException
+	{
+		for ( int i = 0; i < factors.length; ++i )
+		{
+			if ( !checkScaleFactors( factors[ i ] ) )
+			{
+				LOG.error( "Got illegal downscaling factors: {}", factors[ i ] );
+				throw new IllegalArgumentException( "Got illegal downscaling factors: " + Arrays.toString( factors[ i ] ) );
+			}
+		}
+
+		final N5FSWriter writer = new N5FSWriter( n5 );
+		addMultiScaleTag( writer, multiscaleGroup );
+
+		{
+
+			if ( pathToMipmapLevelZero != null )
+			{
+				final Path linkLocation = Paths.get( n5, multiscaleGroup, "s0" );
+				linkLocation.getParent().toFile().mkdirs();
+				LOG.debug( "Creating link at `{}' pointing to `{}'", linkLocation, pathToMipmapLevelZero );
+				try
+				{
+					Files.createSymbolicLink( linkLocation, Paths.get( pathToMipmapLevelZero ) );
+				}
+				catch ( final FileAlreadyExistsException e )
+				{
+					LOG.warn( "Dataset for mipmap level already exists at {}, will not create symlink!", linkLocation );
+				}
+			}
+			int lastMaxNumEntries = -1;
+
+			final String finestScale = Paths.get( multiscaleGroup, "s0" ).toString();
+			final HashMap< String, JsonElement > attributeNames = writer.getAttributes( finestScale );
+			Arrays.asList( "dataType", "compression", "blockSize", "dimensions" ).forEach( attributeNames::remove );
+			for ( final Entry< String, JsonElement > entry : attributeNames.entrySet() )
+			{
+				writer.setAttribute( multiscaleGroup, entry.getKey(), entry.getValue() );
+			}
+
+			for ( int factorIndex = 0, level = 1; factorIndex < factors.length; ++factorIndex, ++level )
+			{
+				final String previousScaleLevel = multiscaleGroup + "/s" + ( level - 1 );
+				final String currentScaleLevel = multiscaleGroup + "/s" + level;
+
+				final int maxNumEntries = factorIndex < maxNumEntriesArray.length ? maxNumEntriesArray[ factorIndex ] : lastMaxNumEntries;
+				lastMaxNumEntries = maxNumEntries;
+
+				SparkDownsampler.downsample( sc,
+						new N5FSReader( n5 ),
+						n5,
+						previousScaleLevel,
+						factors[ factorIndex ],
+						blockSizes[ factorIndex ],
+						n5,
+						currentScaleLevel,
+						compression,
+						maxNumEntries );
+			}
+		}
 	}
 
 	public static void downsample( final JavaSparkContext sc,
@@ -224,9 +262,13 @@ public class SparkDownsampler
 			{
 				offset[ d ] += blockSize[ d ];
 				if ( offset[ d ] < downsampledDimensions[ d ] )
+				{
 					break;
+				}
 				else
+				{
 					offset[ d ] = 0;
+				}
 			}
 		}
 
@@ -260,9 +302,13 @@ public class SparkDownsampler
 	{
 		final String[] split = str.split( splitRegex );
 		for ( int i = 0; i < split.length; ++i )
+		{
 			target[ i ] = Integer.parseInt( split[ i ] );
+		}
 		for ( int k = split.length; k < target.length; ++k )
+		{
 			target[ k ] = Integer.parseInt( split[ split.length - 1 ] );
+		}
 
 		return target;
 	}
@@ -278,8 +324,9 @@ public class SparkDownsampler
 	public static boolean checkScaleFactors( final int[] scaleFactors )
 	{
 		for ( final int factor : scaleFactors )
-			if ( factor < 1 )
-				return false;
+		{
+			if ( factor < 1 ) { return false; }
+		}
 		return true;
 	}
 
@@ -301,15 +348,18 @@ public class SparkDownsampler
 			final int[] scaleFactors )
 	{
 		for ( int d = 0; d < scaleFactors.length; ++d )
-			if ( blockSizeCurrent[ d ] * scaleFactors[ d ] % blockSizePrevious[ d ] != 0 )
-				return false;
+		{
+			if ( blockSizeCurrent[ d ] * scaleFactors[ d ] % blockSizePrevious[ d ] != 0 ) { return false; }
+		}
 		return true;
 	}
 
 	public static void addMultiScaleTag( final N5Writer n5, final String group ) throws IOException
 	{
 		if ( !n5.exists( group ) )
+		{
 			n5.createGroup( group );
+		}
 		n5.setAttribute( group, MULTI_SCALE_KEY, true );
 	}
 }
