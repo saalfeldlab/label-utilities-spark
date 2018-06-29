@@ -1,15 +1,15 @@
-package org.janelia.saalfeldlab.multisets.spark;
+package org.janelia.saalfeldlab.label.spark;
 
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
-import org.janelia.saalfeldlab.multisets.spark.MultisetTools.Tool.FromString;
-import org.janelia.saalfeldlab.multisets.spark.convert.ConvertToLabelMultisetType;
-import org.janelia.saalfeldlab.multisets.spark.downsample.SparkDownsampler;
-import org.janelia.saalfeldlab.multisets.spark.uniquelabels.ExtractUniqueLabelsPerBlock;
-import org.janelia.saalfeldlab.multisets.spark.uniquelabels.LabelToBlockMapping;
-import org.janelia.saalfeldlab.multisets.spark.uniquelabels.downsample.LabelListDownsampler;
+import org.janelia.saalfeldlab.label.spark.MultisetTools.Tool.FromString;
+import org.janelia.saalfeldlab.label.spark.convert.ConvertToLabelMultisetType;
+import org.janelia.saalfeldlab.label.spark.downsample.SparkDownsampler;
+import org.janelia.saalfeldlab.label.spark.uniquelabels.ExtractUniqueLabelsPerBlock;
+import org.janelia.saalfeldlab.label.spark.uniquelabels.LabelToBlockMapping;
+import org.janelia.saalfeldlab.label.spark.uniquelabels.downsample.LabelListDownsampler;
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;

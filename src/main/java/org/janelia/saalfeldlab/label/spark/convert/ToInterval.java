@@ -1,4 +1,4 @@
-package org.janelia.saalfeldlab.multisets.spark.convert;
+package org.janelia.saalfeldlab.label.spark.convert;
 
 import java.util.Arrays;
 

@@ -1,4 +1,4 @@
-package org.janelia.saalfeldlab.multisets.spark.uniquelabels;
+package org.janelia.saalfeldlab.label.spark.uniquelabels;
 
 import java.io.IOException;
 import java.util.Arrays;

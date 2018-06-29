@@ -1,4 +1,4 @@
-package org.janelia.saalfeldlab.multisets.spark.uniquelabels;
+package org.janelia.saalfeldlab.label.spark.uniquelabels;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
@@ -12,10 +12,10 @@ import java.util.stream.Collectors;
 import org.apache.commons.lang.time.DurationFormatUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.janelia.saalfeldlab.multisets.spark.exception.InputSameAsOutput;
-import org.janelia.saalfeldlab.multisets.spark.exception.InvalidDataType;
-import org.janelia.saalfeldlab.multisets.spark.exception.InvalidDataset;
-import org.janelia.saalfeldlab.multisets.spark.exception.InvalidN5Container;
+import org.janelia.saalfeldlab.label.spark.exception.InputSameAsOutput;
+import org.janelia.saalfeldlab.label.spark.exception.InvalidDataType;
+import org.janelia.saalfeldlab.label.spark.exception.InvalidDataset;
+import org.janelia.saalfeldlab.label.spark.exception.InvalidN5Container;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;

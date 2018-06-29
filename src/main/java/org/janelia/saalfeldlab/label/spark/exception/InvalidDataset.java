@@ -1,4 +1,4 @@
-package org.janelia.saalfeldlab.multisets.spark.exception;
+package org.janelia.saalfeldlab.label.spark.exception;
 
 public class InvalidDataset extends Exception
 {

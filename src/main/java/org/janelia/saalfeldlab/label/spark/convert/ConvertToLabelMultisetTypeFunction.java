@@ -1,7 +1,7 @@
-package org.janelia.saalfeldlab.multisets.spark.convert;
+package org.janelia.saalfeldlab.label.spark.convert;
 
 import org.apache.spark.api.java.function.Function;
-import org.janelia.saalfeldlab.multisets.spark.convert.ConvertToLabelMultisetTypeFunction.ConvertedIntervalWithMaxId;
+import org.janelia.saalfeldlab.label.spark.convert.ConvertToLabelMultisetTypeFunction.ConvertedIntervalWithMaxId;
 
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.converter.Converters;

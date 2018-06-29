@@ -1,4 +1,4 @@
-package org.janelia.saalfeldlab.multisets.spark.convert;
+package org.janelia.saalfeldlab.label.spark.convert;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -16,7 +16,7 @@ import java.util.stream.IntStream;
 import org.apache.commons.lang.time.DurationFormatUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.janelia.saalfeldlab.multisets.spark.N5Helpers;
+import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
 import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.CompressionAdapter;

@@ -1,4 +1,4 @@
-package org.janelia.saalfeldlab.multisets.spark.uniquelabels.downsample;
+package org.janelia.saalfeldlab.label.spark.uniquelabels.downsample;
 
 import java.util.Arrays;
 import java.util.List;

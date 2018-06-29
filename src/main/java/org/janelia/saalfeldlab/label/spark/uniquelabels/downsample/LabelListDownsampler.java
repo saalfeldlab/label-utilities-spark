@@ -1,4 +1,4 @@
-package org.janelia.saalfeldlab.multisets.spark.uniquelabels.downsample;
+package org.janelia.saalfeldlab.label.spark.uniquelabels.downsample;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
@@ -16,7 +16,7 @@ import java.util.stream.Stream;
 
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.janelia.saalfeldlab.multisets.spark.downsample.MinToInterval;
+import org.janelia.saalfeldlab.label.spark.downsample.MinToInterval;
 import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.CompressionAdapter;
 import org.janelia.saalfeldlab.n5.DataType;

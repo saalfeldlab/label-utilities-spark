@@ -1,4 +1,4 @@
-package org.janelia.saalfeldlab.multisets.spark;
+package org.janelia.saalfeldlab.label.spark;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;

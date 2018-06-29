@@ -1,7 +1,7 @@
-package org.janelia.saalfeldlab.multisets.spark.convert;
+package org.janelia.saalfeldlab.label.spark.convert;
 
 import org.apache.spark.api.java.function.PairFunction;
-import org.janelia.saalfeldlab.multisets.spark.convert.ConvertToLabelMultisetTypeFunction.ConvertedIntervalWithMaxId;
+import org.janelia.saalfeldlab.label.spark.convert.ConvertToLabelMultisetTypeFunction.ConvertedIntervalWithMaxId;
 
 import net.imglib2.util.Intervals;
 import scala.Tuple2;
