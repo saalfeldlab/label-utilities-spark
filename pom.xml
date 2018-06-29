@@ -53,13 +53,7 @@
 		</developer>
 	</developers>
 
-    <contributors>
-      <contributor>
-        <name>Philipp Hanslovsky</name>
-		<url>http://imagej.net/User:Hanslovsky</url>
-        <properties><id>hanslovsky</id></properties>
-      </contributor>
-    </contributors>
+    <contributors><contributor><name>None</name></contributor></contributors>
 
     <scm>
 		<connection>scm:git:git://github.com/saalfeldlab/n5-label-multisets-spark</connection>
@@ -71,7 +65,7 @@
 		<system>GitHub Issues</system>
 		<url>https://github.com/saalfeldlab/n5-label-multisets-spark/issues</url>
 	</issueManagement>
-	<ciManagement></ciManagement>
+	<ciManagement><system>None</system></ciManagement>
 
 
 	<properties>
