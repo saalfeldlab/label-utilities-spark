@@ -2,7 +2,10 @@
 
 Utilities for [label multisets](https://github.com/saalfeldlab/n5-label-multisets). Currently available:
  - **convert** integer type n5 dataset into label multiset dataset
- - **Downsample** label multiset n5 dataset
+ - **downsample** label multiset n5 dataset
+ - **extract-unique-labels** from a label dataset
+ - **downsample-unique-labels** create mip-map for unique labels
+ - **label-to-block-mapping** generate a mapping from label to containing blocks for a dataset of unique label lists
 
 ## Compile
 
