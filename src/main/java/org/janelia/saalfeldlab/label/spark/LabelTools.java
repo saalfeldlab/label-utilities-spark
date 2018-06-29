@@ -4,7 +4,7 @@ import java.util.Arrays;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
-import org.janelia.saalfeldlab.label.spark.MultisetTools.Tool.FromString;
+import org.janelia.saalfeldlab.label.spark.LabelTools.Tool.FromString;
 import org.janelia.saalfeldlab.label.spark.convert.ConvertToLabelMultisetType;
 import org.janelia.saalfeldlab.label.spark.downsample.SparkDownsampler;
 import org.janelia.saalfeldlab.label.spark.uniquelabels.ExtractUniqueLabelsPerBlock;
@@ -17,7 +17,7 @@ import picocli.CommandLine.ITypeConverter;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-public class MultisetTools
+public class LabelTools
 {
 
 	public static enum Tool
@@ -63,7 +63,7 @@ public class MultisetTools
 
 	}
 
-	@Command( name = "multiset-tools" )
+	@Command( name = "label-tools" )
 	public static class CommandLineParameters implements Callable< Boolean >
 	{
 
