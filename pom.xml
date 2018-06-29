@@ -10,12 +10,12 @@
 	</parent>
 
 	<groupId>org.janelia.saalfeldlab</groupId>
-	<artifactId>n5-label-multisets-spark</artifactId>
+	<artifactId>label-utilities-spark</artifactId>
 	<version>0.1.0-SNAPSHOT</version>
 
 	<name>N5-Label-Multisets-Spark</name>
-	<description>Spark based tools for n5 label multisets.</description>
-    <url>https://github.com/saalfeldlab/n5-label-multisets-spark</url>
+	<description>Spark based tools for label data.</description>
+    <url>https://github.com/saalfeldlab/label-utilities-spark</url>
     <inceptionYear>2018</inceptionYear>
     <!-- <organization>saalfeldlab</organization> -->
 	<organization>
@@ -56,14 +56,14 @@
     <contributors><contributor><name>None</name></contributor></contributors>
 
     <scm>
-		<connection>scm:git:git://github.com/saalfeldlab/n5-label-multisets-spark</connection>
-		<developerConnection>scm:git:git@github.com:saalfeldlab/n5-label-multisets-spark</developerConnection>
+		<connection>scm:git:git://github.com/saalfeldlab/label-utilities-spark</connection>
+		<developerConnection>scm:git:git@github.com:saalfeldlab/label-utilities-spark</developerConnection>
 		<tag>HEAD</tag>
-		<url>https://github.com/saalfeldlab/n5-label-multisets-spark</url>
+		<url>https://github.com/saalfeldlab/label-utilities-spark</url>
 	</scm>
 	<issueManagement>
 		<system>GitHub Issues</system>
-		<url>https://github.com/saalfeldlab/n5-label-multisets-spark/issues</url>
+		<url>https://github.com/saalfeldlab/label-utilities-spark/issues</url>
 	</issueManagement>
 	<ciManagement><system>None</system></ciManagement>
 
