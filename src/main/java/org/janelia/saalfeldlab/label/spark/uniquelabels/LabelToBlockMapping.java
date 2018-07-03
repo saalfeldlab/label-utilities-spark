@@ -101,7 +101,7 @@ public class LabelToBlockMapping
 		}
 	}
 
-	private static final void createMapping(
+	public static final void createMapping(
 			final JavaSparkContext sc,
 			final String inputN5,
 			final String inputDataset,

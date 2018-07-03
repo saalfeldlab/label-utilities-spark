@@ -15,9 +15,9 @@
 
 	<name>N5-Label-Multisets-Spark</name>
 	<description>Spark based tools for label data.</description>
-    <url>https://github.com/saalfeldlab/label-utilities-spark</url>
-    <inceptionYear>2018</inceptionYear>
-    <!-- <organization>saalfeldlab</organization> -->
+	<url>https://github.com/saalfeldlab/label-utilities-spark</url>
+	<inceptionYear>2018</inceptionYear>
+	<!-- <organization>saalfeldlab</organization> -->
 	<organization>
 		<name>Saalfeld Lab</name>
 		<url>http://saalfeldlab.janelia.org/</url>
@@ -36,7 +36,7 @@
 		</mailingList>
 	</mailingLists>
 
-    <developers>
+	<developers>
 		<developer>
 			<id>hanslovsky</id>
 			<name>Philipp Hanslovsky</name>
@@ -53,9 +53,13 @@
 		</developer>
 	</developers>
 
-    <contributors><contributor><name>None</name></contributor></contributors>
+	<contributors>
+		<contributor>
+			<name>None</name>
+		</contributor>
+	</contributors>
 
-    <scm>
+	<scm>
 		<connection>scm:git:git://github.com/saalfeldlab/label-utilities-spark</connection>
 		<developerConnection>scm:git:git@github.com:saalfeldlab/label-utilities-spark</developerConnection>
 		<tag>HEAD</tag>
@@ -65,14 +69,16 @@
 		<system>GitHub Issues</system>
 		<url>https://github.com/saalfeldlab/label-utilities-spark/issues</url>
 	</issueManagement>
-	<ciManagement><system>None</system></ciManagement>
+	<ciManagement>
+		<system>None</system>
+	</ciManagement>
 
 
 	<properties>
 		<scijava.jvm.version>1.8</scijava.jvm.version>
-        <allowedDuplicateClasses>*</allowedDuplicateClasses>
+		<allowedDuplicateClasses>*</allowedDuplicateClasses>
 
-        <license.licenseName>bsd_2</license.licenseName>
+		<license.licenseName>bsd_2</license.licenseName>
 		<license.copyrightOwners>Stephan Saalfeld</license.copyrightOwners>
 	</properties>
 
@@ -134,6 +140,14 @@
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-api</artifactId>
 		</dependency>
+
+		<!-- test -->
+		<dependency>
+			<groupId>junit</groupId>
+			<artifactId>junit</artifactId>
+			<scope>test</scope>
+		</dependency>
+
 	</dependencies>
 
 	<profiles>
