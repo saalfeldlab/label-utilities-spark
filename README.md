@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/saalfeldlab/label-utilities-spark.svg?branch=master)](https://travis-ci.org/saalfeldlab/label-utilities-spark)
+
 # Spark Utilities for Label Data
 
 Utilities for [label multisets](https://github.com/saalfeldlab/n5-label-multisets). Currently available:
