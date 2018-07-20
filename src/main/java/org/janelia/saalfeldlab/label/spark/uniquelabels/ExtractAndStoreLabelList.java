@@ -3,7 +3,7 @@ package org.janelia.saalfeldlab.label.spark.uniquelabels;
 import java.io.IOException;
 import java.util.Arrays;
 
-import org.apache.spark.api.java.function.VoidFunction;
+import org.apache.spark.api.java.function.Function;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
@@ -28,7 +28,7 @@ import net.imglib2.util.Intervals;
 import net.imglib2.view.Views;
 import scala.Tuple2;
 
-public class ExtractAndStoreLabelList implements VoidFunction< Tuple2< long[], long[] > >
+public class ExtractAndStoreLabelList implements Function< Tuple2< long[], long[] >, Long >
 {
 
 	private final String inputN5;
@@ -65,36 +65,9 @@ public class ExtractAndStoreLabelList implements VoidFunction< Tuple2< long[], l
 	}
 
 	@Override
-	public void call( final Tuple2< long[], long[] > minMax ) throws Exception
+	public Long call( final Tuple2< long[], long[] > minMax ) throws Exception
 	{
-		final Interval interval = new FinalInterval( minMax._1(), minMax._2() );
-		final CellGrid grid = new CellGrid( dims, blockSize );
-		final N5Reader n5reader = ExtractUniqueLabelsPerBlock.n5Reader( inputN5, blockSize );
-		final TLongHashSet uniqueLabels = new TLongHashSet();
-		final RandomAccessibleInterval< ? extends IntegerType< ? > > img = getData(
-				interval,
-				blockSize,
-				grid,
-				n5reader,
-				inputDataset,
-				isMultisetType );
-		for ( final IntegerType< ? > val : Views.iterable( img ) )
-		{
-			uniqueLabels.add( val.getIntegerLong() );
-		}
-		final long[] pos = Intervals.minAsLongArray( interval );
-		Arrays.setAll( pos, d -> pos[ d ] / blockSize[ d ] );
-		final LongArrayDataBlock block = new LongArrayDataBlock(
-				Intervals.dimensionsAsIntArray( interval ),
-				pos,
-				uniqueLabels.toArray() );
-		final N5Writer n5writer = ExtractUniqueLabelsPerBlock.n5Writer( outputN5, blockSize );
-		final DatasetAttributes attributes = new DatasetAttributes(
-				grid.getImgDimensions(),
-				blockSize,
-				DataType.UINT64,
-				new GzipCompression() );
-		n5writer.writeBlock( outputDataset, attributes, block );
+		return callImpl( dims, blockSize, inputN5, inputDataset, outputN5, outputDataset, isMultisetType, minMax );
 	}
 
 	private static < I extends IntegerType< I > > RandomAccessibleInterval< I > getData(
@@ -127,6 +100,51 @@ public class ExtractAndStoreLabelList implements VoidFunction< Tuple2< long[], l
 					interval );
 		}
 		return img;
+	}
+
+	private static < I extends IntegerType< I > > long callImpl(
+			final long[] dims,
+			final int[] blockSize,
+			final String inputN5,
+			final String inputDataset,
+			final String outputN5,
+			final String outputDataset,
+			final boolean isMultisetType,
+			final Tuple2< long[], long[] > minMax ) throws IOException
+	{
+		final Interval interval = new FinalInterval( minMax._1(), minMax._2() );
+		final CellGrid grid = new CellGrid( dims, blockSize );
+		final N5Reader n5reader = ExtractUniqueLabelsPerBlock.n5Reader( inputN5, blockSize );
+		final TLongHashSet uniqueLabels = new TLongHashSet();
+		final RandomAccessibleInterval< I > img = getData(
+				interval,
+				blockSize,
+				grid,
+				n5reader,
+				inputDataset,
+				isMultisetType );
+		long maxVal = 0;
+		for ( final I val : Views.iterable( img ) )
+		{
+			final long primitiveVal = val.getIntegerLong();
+			uniqueLabels.add( primitiveVal );
+			if ( primitiveVal > maxVal )
+				maxVal = primitiveVal;
+		}
+		final long[] pos = Intervals.minAsLongArray( interval );
+		Arrays.setAll( pos, d -> pos[ d ] / blockSize[ d ] );
+		final LongArrayDataBlock block = new LongArrayDataBlock(
+				Intervals.dimensionsAsIntArray( interval ),
+				pos,
+				uniqueLabels.toArray() );
+		final N5Writer n5writer = ExtractUniqueLabelsPerBlock.n5Writer( outputN5, blockSize );
+		final DatasetAttributes attributes = new DatasetAttributes(
+				grid.getImgDimensions(),
+				blockSize,
+				DataType.UINT64,
+				new GzipCompression() );
+		n5writer.writeBlock( outputDataset, attributes, block );
+		return maxVal;
 	}
 
 }

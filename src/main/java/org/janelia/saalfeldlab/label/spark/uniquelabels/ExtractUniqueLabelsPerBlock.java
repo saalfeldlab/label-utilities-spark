@@ -85,7 +85,7 @@ public class ExtractUniqueLabelsPerBlock
 
 	}
 
-	public static void extractUniqueLabels(
+	public static long extractUniqueLabels(
 			final JavaSparkContext sc,
 			final String inputN5,
 			final String outputN5,
@@ -134,9 +134,10 @@ public class ExtractUniqueLabelsPerBlock
 				.stream()
 				.map( i -> new Tuple2<>( Intervals.minAsLongArray( i ), Intervals.maxAsLongArray( i ) ) )
 				.collect( Collectors.toList() );
-		sc
+
+		return sc
 				.parallelize( intervals )
-				.foreach(
+				.map(
 						new ExtractAndStoreLabelList(
 								inputN5,
 								outputN5,
@@ -144,7 +145,8 @@ public class ExtractUniqueLabelsPerBlock
 								outputDataset,
 								dims,
 								blockSize,
-								isMultisetType ) );
+								isMultisetType ) )
+				.reduce( Math::max );
 	}
 
 	public static void run( final String... args ) throws IOException
