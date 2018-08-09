@@ -14,6 +14,7 @@ import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.google.gson.GsonBuilder;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
 import org.apache.commons.lang3.time.DurationFormatUtils;
@@ -22,6 +23,8 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.label.spark.exception.InvalidDataset;
 import org.janelia.saalfeldlab.label.spark.exception.InvalidN5Container;
+import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookup;
+import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookupAdapter;
 import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookupFromN5;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
@@ -98,7 +101,7 @@ public class LabelToBlockMapping
 			final int stepSize ) throws IOException
 	{
 		final N5Reader reader = N5Helpers.n5Reader( inputN5, N5Helpers.DEFAULT_BLOCK_SIZE );
-		final N5FSWriter writer = new N5FSWriter(outputN5);
+		final N5FSWriter writer = new N5FSWriter(outputN5, new GsonBuilder().registerTypeHierarchyAdapter(LabelBlockLookup.class, LabelBlockLookupAdapter.getJsonAdapter()));
 		writer.createGroup(outputGroup);
 		final String pattern = outputGroup + "/s%d";
 		writer.setAttribute(outputGroup, "labelBlockLookup", new LabelBlockLookupFromN5( outputN5, pattern) );
