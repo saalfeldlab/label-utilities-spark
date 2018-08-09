@@ -34,7 +34,7 @@ public class LabelToBlockMappingN5
 		@CommandLine.Option(names={"--output-group", "-g"}, paramLabel = "OUTPUT_GROUP", description = "Output group, defaults to 'label-to-block-mapping'")
 		private String outputGroup;
 
-		@CommandLine.Option(names={"--store-as-n5"}, paramLabel = "N5_STEP_SIZE", description = "Store as n5 instead of single file with <N5_STEP_SIZE> entries per block. Has to be larger than 0.")
+		@CommandLine.Option(names={"--step-size", "-s"}, paramLabel = "N5_STEP_SIZE", description = "Store as n5 instead of single file with <N5_STEP_SIZE> entries per block. Has to be larger than 0.")
 		private Integer n5StepSize;
 
 		@Override
