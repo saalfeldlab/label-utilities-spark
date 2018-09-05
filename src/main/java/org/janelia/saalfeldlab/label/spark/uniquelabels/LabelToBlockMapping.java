@@ -53,14 +53,17 @@ public class LabelToBlockMapping
 		@Parameters( index = "0", paramLabel = "INPUT_N5", description = "Input N5 container" )
 		private String inputN5;
 
-		@Parameters( index = "1", paramLabel = "INPUT_DATASET", description = "Input dataset. Must be LabelMultisetType or integer type" )
+		@Parameters( index = "1", paramLabel = "INPUT_DATASET", description = "Input dataset: contained labels in each block. Must deserialize to long[] array." )
 		private String inputDataset;
 
-		@Parameters( index = "2", paramLabel = "OUTPUT_DIRECTORY", description = "Output directory" )
+		@Parameters( index = "2", paramLabel = "OUTPUT_DIRECTORY", description = "Output directory. If --store-as-n5 flag is used, this is a group in the container OUTPUT_N5" )
 		private String outputDirectory;
 
 		@CommandLine.Option(names={"--store-as-n5"}, paramLabel = "N5_STEP_SIZE", description = "Store as n5 instead of single file with <N5_STEP_SIZE> entries per block.")
 		private Integer n5StepSize;
+
+		@CommandLine.Option(names={"--output-n5"}, paramLabel = "OUTPUT_N5", description = "Only used with `--store-as-n5' flag. Defaults to INPUT_N5 if not specified")
+		private String outputN5 = null;
 
 		@Override
 		public Void call() throws Exception
@@ -69,13 +72,18 @@ public class LabelToBlockMapping
 
 			if ( this.inputDataset == null ) { throw new InvalidDataset( "INPUT_DATASET", inputDataset ); }
 
+			this.outputN5 = this.outputN5 == null ? this.inputN5 : this.outputN5;
+
 			final long startTime = System.currentTimeMillis();
 
 			final SparkConf conf = new SparkConf().setAppName( MethodHandles.lookup().lookupClass().getName() );
 
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
-				createMappingWithMultiscaleCheck( sc, inputN5, inputDataset, outputDirectory );
+				if (this.n5StepSize == null )
+					createMappingWithMultiscaleCheck( sc, inputN5, inputDataset, outputDirectory );
+				else
+					createMappingWithMultiscaleCheckN5(sc, inputN5, inputDataset, outputN5, outputDirectory, this.n5StepSize);
 			}
 
 			final long endTime = System.currentTimeMillis();
