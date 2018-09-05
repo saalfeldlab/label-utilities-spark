@@ -120,7 +120,7 @@ public class SparkDownsampler
 			final SparkConf conf = new SparkConf().setAppName( "SparkDownsampler" );
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
-				downsampleMultiscale( sc, defaultBlockSize, defaultBlockSize, factors, blockSizes, maxNumEntries, compression, defaultBlockSize );
+				downsampleMultiscale( sc, n5, multiscaleGroup, factors, blockSizes, maxNumEntries, compression, defaultBlockSize );
 			}
 
 			return null;
