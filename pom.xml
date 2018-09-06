@@ -32,7 +32,7 @@
 	<mailingLists>
 		<mailingList>
 			<name>ImageJ Forum</name>
-			<archive>http://forum.imagej.net/</archive>
+			<archive>http://forum.image.sc/</archive>
 		</mailingList>
 	</mailingLists>
 
@@ -94,6 +94,11 @@
 	</repositories>
 
 	<dependencies>
+		<dependency>
+			<groupId>org.janelia.saalfeldlab</groupId>
+			<artifactId>label-utilities</artifactId>
+			<version>0.1.0</version>
+		</dependency>
 		<dependency>
 			<groupId>org.apache.spark</groupId>
 			<artifactId>spark-core_2.11</artifactId>

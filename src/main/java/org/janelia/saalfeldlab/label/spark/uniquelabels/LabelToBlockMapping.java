@@ -2,25 +2,35 @@ package org.janelia.saalfeldlab.label.spark.uniquelabels;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.google.gson.GsonBuilder;
+import net.imglib2.FinalInterval;
+import net.imglib2.Interval;
 import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.label.spark.exception.InvalidDataset;
 import org.janelia.saalfeldlab.label.spark.exception.InvalidN5Container;
+import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookup;
+import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookupAdapter;
+import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookupFromN5;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
+import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,11 +53,17 @@ public class LabelToBlockMapping
 		@Parameters( index = "0", paramLabel = "INPUT_N5", description = "Input N5 container" )
 		private String inputN5;
 
-		@Parameters( index = "1", paramLabel = "INPUT_DATASET", description = "Input dataset. Must be LabelMultisetType or integer type" )
+		@Parameters( index = "1", paramLabel = "INPUT_DATASET", description = "Input dataset: contained labels in each block. Must deserialize to long[] array." )
 		private String inputDataset;
 
-		@Parameters( index = "2", paramLabel = "OUTPUT_DIRECTORY", description = "Output directory" )
+		@Parameters( index = "2", paramLabel = "OUTPUT_DIRECTORY", description = "Output directory. If --store-as-n5 flag is used, this is a group in the container OUTPUT_N5" )
 		private String outputDirectory;
+
+		@CommandLine.Option(names={"--store-as-n5"}, paramLabel = "N5_STEP_SIZE", description = "Store as n5 instead of single file with <N5_STEP_SIZE> entries per block.")
+		private Integer n5StepSize;
+
+		@CommandLine.Option(names={"--output-n5"}, paramLabel = "OUTPUT_N5", description = "Only used with `--store-as-n5' flag. Defaults to INPUT_N5 if not specified")
+		private String outputN5 = null;
 
 		@Override
 		public Void call() throws Exception
@@ -56,13 +72,18 @@ public class LabelToBlockMapping
 
 			if ( this.inputDataset == null ) { throw new InvalidDataset( "INPUT_DATASET", inputDataset ); }
 
+			this.outputN5 = this.outputN5 == null ? this.inputN5 : this.outputN5;
+
 			final long startTime = System.currentTimeMillis();
 
 			final SparkConf conf = new SparkConf().setAppName( MethodHandles.lookup().lookupClass().getName() );
 
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
-				createMappingWithMultiscaleCheck( sc, inputN5, inputDataset, outputDirectory );
+				if (this.n5StepSize == null )
+					createMappingWithMultiscaleCheck( sc, inputN5, inputDataset, outputDirectory );
+				else
+					createMappingWithMultiscaleCheckN5(sc, inputN5, inputDataset, outputN5, outputDirectory, this.n5StepSize);
 			}
 
 			final long endTime = System.currentTimeMillis();
@@ -77,6 +98,49 @@ public class LabelToBlockMapping
 	public static void run( final String[] args ) throws IOException
 	{
 		CommandLine.call( new CommandLineParameters(), System.err, args );
+	}
+
+	public static final void createMappingWithMultiscaleCheckN5(
+			final JavaSparkContext sc,
+			final String inputN5,
+			final String inputDataset,
+			final String outputN5,
+			final String outputGroup,
+			final int stepSize ) throws IOException
+	{
+		final N5Reader reader = N5Helpers.n5Reader( inputN5, N5Helpers.DEFAULT_BLOCK_SIZE );
+		final N5FSWriter writer = new N5FSWriter(outputN5, new GsonBuilder().registerTypeHierarchyAdapter(LabelBlockLookup.class, LabelBlockLookupAdapter.getJsonAdapter()));
+		writer.createGroup(outputGroup);
+		final String pattern = outputGroup + "/s%d";
+		writer.setAttribute(outputGroup, "labelBlockLookup", new LabelBlockLookupFromN5( outputN5, pattern) );
+
+		if ( N5Helpers.isMultiScale( reader, inputDataset ) )
+		{
+			final String[] sortedScaleDirs = N5Helpers.listAndSortScaleDatasets(reader, inputDataset);
+			for ( int level = 0; level < sortedScaleDirs.length; ++level )
+			{
+				final String scaleDataset = sortedScaleDirs[ level ];
+				writer.createDataset( outputGroup + "/" + scaleDataset, new long[] { Long.MAX_VALUE }, new int[] { stepSize }, DataType.INT8, new GzipCompression() );
+				LOG.info( "Creating mapping for scale dataset {} in group {} of n5 container {} at target {}", scaleDataset, inputDataset, inputN5, outputGroup );
+				createMappingN5(
+						sc,
+						inputN5,
+						inputDataset + "/" + scaleDataset,
+						new LabelBlockLookupN5Supplier( outputN5, pattern ),
+						level,
+						stepSize );
+			}
+		}
+		else
+		{
+			createMappingN5(
+					sc,
+					inputN5,
+					inputDataset,
+					() -> new LabelBlockLookupFromN5(outputN5, outputGroup),
+					0,
+					stepSize );
+		}
 	}
 
 	public static final void createMappingWithMultiscaleCheck(
@@ -99,6 +163,69 @@ public class LabelToBlockMapping
 			LOG.info( "Creating mapping for dataset {} of n5 container {} at target {}", inputDataset, inputN5, outputDirectory );
 			createMapping( sc, inputN5, inputDataset, outputDirectory );
 		}
+	}
+
+	public static final void createMappingN5(
+			final JavaSparkContext sc,
+			final String inputN5,
+			final String inputDataset,
+			final Supplier<LabelBlockLookupFromN5> blockLookup,
+			final int level,
+			final int stepSize ) throws IOException
+	{
+		final N5Reader reader = N5Helpers.n5Reader( inputN5 );
+		final DatasetAttributes inputAttributes = reader.getDatasetAttributes( inputDataset );
+		final int[] blockSize = inputAttributes.getBlockSize();
+		final long[] dims = inputAttributes.getDimensions();
+		final List< Tuple2< long[], long[] > > intervals = Grids
+				.collectAllContainedIntervals( dims, blockSize )
+				.stream()
+				.map( i -> new Tuple2<>( Intervals.minAsLongArray( i ), Intervals.maxAsLongArray( i ) ) )
+				.collect( Collectors.toList() );
+		sc
+				.parallelize( intervals )
+				.mapToPair( minMax -> {
+					final long[] blockPos = N5Helpers.blockPos( minMax._1(), blockSize );
+					final N5Reader n5reader = N5Helpers.n5Reader( inputN5, N5Helpers.DEFAULT_BLOCK_SIZE );
+					final LongArrayDataBlock block = ( LongArrayDataBlock ) n5reader.readBlock( inputDataset, new DatasetAttributes( dims, blockSize, DataType.UINT64, new GzipCompression() ), blockPos );
+					return new Tuple2<>( minMax, block.getData() );
+				} )
+				.flatMapToPair( input -> Arrays
+						.stream( input._2() )
+						.mapToObj( id -> new Tuple2<>( id, input._1() ) )
+						.iterator() )
+				.aggregateByKey(
+						new ArrayList< Tuple2< long[], long[] > >(),
+						( l, v ) -> {
+							l.add( v );
+							return l;
+						},
+						( al1, al2 ) -> {
+							final ArrayList< Tuple2< long[], long[] > > al = new ArrayList<>();
+							al.addAll( al1 );
+							al.addAll( al2 );
+							return al;
+						} )
+				.mapToPair( input -> new Tuple2<>(input._1() / stepSize, input))
+				.aggregateByKey(
+						new ArrayList< Tuple2< Long, ArrayList< Tuple2< long[], long[] > > > >(),
+						( l, v ) -> {
+							l.add( v );
+							return l;
+						},
+						( al1, al2 ) -> {
+							final ArrayList< Tuple2< Long, ArrayList< Tuple2< long[], long[] > > > > al = new ArrayList<>();
+							al.addAll( al1 );
+							al.addAll( al2 );
+							return al;
+						} )
+				.values()
+				.foreach( list -> {
+					final LabelBlockLookupFromN5     bl  = blockLookup.get();
+					final HashMap< Long, Interval[]> map = new HashMap<>();
+					list.stream().map(t -> new Tuple2<>(t._1(), t._2().stream().map(p -> new FinalInterval(p._1(), p._2())).toArray(Interval[]::new))).forEach(t -> map.put(t._1(), t._2()));
+					bl.set(level, map);
+				} );
 	}
 
 	public static final void createMapping(
@@ -161,6 +288,26 @@ public class LabelToBlockMapping
 					}
 					Files.write( data, Paths.get( outputDirectory, id ).toFile() );
 				} );
+	}
+
+	private static class LabelBlockLookupN5Supplier implements Supplier<LabelBlockLookupFromN5>, Serializable
+	{
+
+		private final String root;
+
+		private final String pattern;
+
+		private LabelBlockLookupN5Supplier(final String root, final String pattern)
+		{
+			this.root = root;
+			this.pattern = pattern;
+		}
+
+		@Override
+		public LabelBlockLookupFromN5 get()
+		{
+			return new LabelBlockLookupFromN5(root, pattern);
+		}
 	}
 
 }
