@@ -70,7 +70,8 @@
 		<url>https://github.com/saalfeldlab/label-utilities-spark/issues</url>
 	</issueManagement>
 	<ciManagement>
-		<system>None</system>
+		<system>Travis CI</system>
+		<url>https://travis-ci.org/saalfeldlab/label-utilities-spark</url>
 	</ciManagement>
 
 
