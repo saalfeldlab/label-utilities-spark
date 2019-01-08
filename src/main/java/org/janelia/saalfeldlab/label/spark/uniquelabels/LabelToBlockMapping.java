@@ -25,7 +25,7 @@ import org.janelia.saalfeldlab.label.spark.exception.InvalidDataset;
 import org.janelia.saalfeldlab.label.spark.exception.InvalidN5Container;
 import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookup;
 import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookupAdapter;
-import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookupFromN5;
+import org.janelia.saalfeldlab.labels.blocks.n5.LabelBlockLookupFromN5;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
