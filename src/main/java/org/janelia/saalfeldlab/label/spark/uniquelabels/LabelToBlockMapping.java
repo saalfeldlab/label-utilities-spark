@@ -25,7 +25,7 @@ import org.janelia.saalfeldlab.label.spark.exception.InvalidDataset;
 import org.janelia.saalfeldlab.label.spark.exception.InvalidN5Container;
 import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookup;
 import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookupAdapter;
-import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookupFromN5;
+import org.janelia.saalfeldlab.labels.blocks.n5.LabelBlockLookupFromN5;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
@@ -287,6 +287,77 @@ public class LabelToBlockMapping
 						bb.putLong( l2[ 2 ] );
 					}
 					Files.write( data, Paths.get( outputDirectory, id ).toFile() );
+				} );
+	}
+
+	public static final void createMappingWithMultiscaleCheck(
+			final JavaSparkContext sc,
+			final String inputN5,
+			final String inputDataset,
+			final Supplier<? extends LabelBlockLookup> lookup ) throws IOException
+	{
+		final N5Reader reader = N5Helpers.n5Reader( inputN5, N5Helpers.DEFAULT_BLOCK_SIZE );
+		if ( N5Helpers.isMultiScale( reader, inputDataset ) )
+		{
+			final String[] scaleDatasets = N5Helpers.listAndSortScaleDatasets(reader, inputDataset);
+			for (int level = 0; level < scaleDatasets.length; ++level)
+			{
+				final String scaleDataset = scaleDatasets[level];
+				LOG.info( "Creating mapping for scale dataset {} in group {} of n5 container {}", scaleDataset, inputDataset, inputN5 );
+				createMapping(sc, inputN5, Paths.get(inputDataset, scaleDataset).toString(), level, lookup);
+			}
+		}
+		else
+		{
+			LOG.info( "Creating mapping for dataset {} of n5 container {} at target", inputDataset, inputN5);
+			createMapping( sc, inputN5, inputDataset, 0, lookup);
+		}
+	}
+
+	public static final void createMapping(
+			final JavaSparkContext sc,
+			final String inputN5,
+			final String inputDataset,
+			final int level,
+			final Supplier<? extends LabelBlockLookup> lookup) throws IOException
+	{
+		final N5Reader reader = N5Helpers.n5Reader( inputN5 );
+		final DatasetAttributes inputAttributes = reader.getDatasetAttributes( inputDataset );
+		final int[] blockSize = inputAttributes.getBlockSize();
+		final long[] dims = inputAttributes.getDimensions();
+		final List< Tuple2< long[], long[] > > intervals = Grids
+				.collectAllContainedIntervals( dims, blockSize )
+				.stream()
+				.map( i -> new Tuple2<>( Intervals.minAsLongArray( i ), Intervals.maxAsLongArray( i ) ) )
+				.collect( Collectors.toList() );
+		sc
+				.parallelize( intervals )
+				.mapToPair( minMax -> {
+					final long[] blockPos = N5Helpers.blockPos( minMax._1(), blockSize );
+					final N5Reader n5reader = N5Helpers.n5Reader( inputN5, N5Helpers.DEFAULT_BLOCK_SIZE );
+					final LongArrayDataBlock block = ( LongArrayDataBlock ) n5reader.readBlock( inputDataset, new DatasetAttributes( dims, blockSize, DataType.UINT64, new GzipCompression() ), blockPos );
+					return new Tuple2<>( minMax, block.getData() );
+				} )
+				.flatMapToPair( input -> Arrays
+						.stream( input._2() )
+						.mapToObj( id -> new Tuple2<>( id, input._1() ) )
+						.iterator() )
+				.aggregateByKey(
+						new ArrayList< Tuple2< long[], long[] > >(),
+						( l, v ) -> {
+							l.add( v );
+							return l;
+						},
+						( al1, al2 ) -> {
+							final ArrayList< Tuple2< long[], long[] > > al = new ArrayList<>();
+							al.addAll( al1 );
+							al.addAll( al2 );
+							return al;
+						} )
+				.foreach( list -> {
+					final Long id = list._1();
+					final Interval[] intervalsList = list._2().stream().map(p -> new FinalInterval(p._1(), p._2())).toArray(Interval[]::new);
+					lookup.get().write(level, id, intervalsList);
 				} );
 	}
 
