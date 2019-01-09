@@ -263,14 +263,13 @@ public class SparkWatersheds {
 							threshold,
 							offsets,
 							id -> id + minId);
-					final DatasetAttributes attrs = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression());
+					final DatasetAttributes labelsAttrs = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression());
 					LOG.info("Saving interval {} at min {} and max id {}", toString(Intervals.expand(labels, negativeHalo)), Intervals.minAsLongArray(t._1()), maxId);
 					long[] blockOffset = Intervals.minAsLongArray(t._1());
 					grid.getCellPosition(blockOffset, blockOffset);
 
-					N5Utils.saveBlock(Views.interval(labels, Intervals.expand(labels, negativeHalo)), n5out.get(), connectedComponents, attrs, blockOffset);
+					N5Utils.saveBlock(Views.interval(labels, Intervals.expand(labels, negativeHalo)), n5out.get(), connectedComponents, labelsAttrs, blockOffset);
 
-					final long[][] invertedSteps = Stream.of(offsets).map(it -> LongStream.of(it).map(l -> -l)).toArray(long[][]::new);
 					final RandomAccessibleInterval<BitType> watershedSeedsMaskImg = ArrayImgs.bits(Intervals.dimensionsAsLongArray(unionFindMask));
 					Watersheds.seedsFromMask(Views.extendValue(unionFindMask, new BitType(true)), watershedSeedsMaskImg, Watersheds.symmetricOffsets(offsets));
 					final List<Point> seeds = Watersheds.collectSeeds(watershedSeedsMaskImg);
@@ -280,13 +279,15 @@ public class SparkWatersheds {
 						else tgt.setZero();
 					}, new ByteType());
 
-					N5Utils.saveBlock(Views.interval(watershedSeedsMaskAsByte, Intervals.expand(watershedSeedsMaskAsByte, negativeHalo)), n5out.get(), watershedSeedsMask, attrs, blockOffset);
+					final DatasetAttributes watershedSeedsMaskAttrs = new DatasetAttributes(outputDims, blockSize, DataType.UINT8, new GzipCompression());
+					N5Utils.saveBlock(Views.interval(watershedSeedsMaskAsByte, Intervals.expand(watershedSeedsMaskAsByte, negativeHalo)), n5out.get(), watershedSeedsMask, watershedSeedsMaskAttrs, blockOffset);
 
 					final ImgFactory<FloatType> factory = new ArrayImgFactory<>(new FloatType());
 					final RandomAccessibleInterval<FloatType> symmetricAffinities = Watersheds.constructAffinities(t._2(), offsets, factory);
 					Watersheds.seededFromAffinities(Views.collapseReal(symmetricAffinities), labels, seeds, offsets);
 
-					N5Utils.saveBlock(Views.interval(labels, Intervals.expand(labels, negativeHalo)), n5out.get(), watersheds, attrs, blockOffset);
+					final DatasetAttributes watershedsAttrs = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression());
+					N5Utils.saveBlock(Views.interval(labels, Intervals.expand(labels, negativeHalo)), n5out.get(), watersheds, watershedsAttrs, blockOffset);
 
 					return new Tuple2<>(t, new Tuple3<>(affs, unionFindMask, labels));
 				})
