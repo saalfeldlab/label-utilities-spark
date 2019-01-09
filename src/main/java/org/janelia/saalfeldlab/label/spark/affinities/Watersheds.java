@@ -20,6 +20,7 @@ import net.imglib2.type.logic.BoolType;
 import net.imglib2.type.numeric.integer.UnsignedLongType;
 import net.imglib2.type.numeric.real.FloatType;
 import net.imglib2.util.ConstantUtils;
+import net.imglib2.util.IntervalIndexer;
 import net.imglib2.util.Intervals;
 import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
@@ -132,7 +133,6 @@ public class Watersheds {
 	}
 
 	public static void run(final String... argv) throws IOException {
-		final String[] ok = "abc".split("123");
 
 		final Args args = new Args();
 		final CommandLine cmdLine = new CommandLine(args)
@@ -253,17 +253,22 @@ public class Watersheds {
 					labels.forEach(it -> it.set(Label.INVALID));
 					final ArrayImg<BitType, LongArray> unionFindMask = ArrayImgs.bits(Intervals.dimensionsAsLongArray(affs));
 					LOG.info("Connected components on interval {}/{} with threshold {}", toString(labels), toString(affs), threshold);
+					final CellGrid grid = new CellGrid(outputDims, blockSize);
+					final long[] cellPos = Intervals.minAsLongArray(t._1());
+					grid.getCellPosition(cellPos, cellPos);
+					final long minId = IntervalIndexer.positionToIndex(cellPos, grid.getGridDimensions()) * Intervals.numElements(blockSize) + 1;
 					final long maxId = ConnectedComponents.fromSymmetricAffinities(
 							Views.extendValue(mask, new BoolType(false)),
 							affs,
 							labels,
 							Views.extendZero(unionFindMask),
 							threshold,
-							offsets);
+							offsets,
+							id -> id + minId);
 					final DatasetAttributes attrs = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression());
 					LOG.info("Saving interval {} at min {} and max id {}", toString(Intervals.expand(labels, negativeHalo)), Intervals.minAsLongArray(t._1()), maxId);
 					long[] blockOffset = Intervals.minAsLongArray(t._1());
-					new CellGrid(outputDims, blockSize).getCellPosition(blockOffset, blockOffset);
+					grid.getCellPosition(blockOffset, blockOffset);
 					N5Utils.saveBlock(Views.interval(labels, Intervals.expand(labels, negativeHalo)), n5out.get(), connectedComponents, attrs, blockOffset);
 					return new Tuple2<>(t, new Tuple3<>(affs, unionFindMask, labels));
 				})
