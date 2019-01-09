@@ -107,9 +107,6 @@ public class SparkWatersheds {
 		@CommandLine.Option(names = "--watershed-seeds-mask-dataset", paramLabel = "WATERSHED_SEEDS_MASK", description = "Path to watershed seeds mask in OUTPUT_CONTAINER")
 		String watershedSeedsMask = "volumes/labels/watershed_seeds";
 
-		@CommandLine.Option(names = "--watershed-seeds-dataset", paramLabel = "WATERSHED_SEEDS", description = "Path to watershed seeds in OUTPUT_CONTAINER")
-		String watershedSeeds = "lists/labels/watershed_seeds";
-
 		@CommandLine.Option(names = "--invert-affinities-axis", paramLabel = "INVERT_AFFINITIES_AXIS", description = "Invert axis that holds affinities. This is necessary if affinities were generated as [z,y,x].")
 		Boolean invertAffinitiesAxis = false;
 
