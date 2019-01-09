@@ -1,14 +1,17 @@
 package org.janelia.saalfeldlab.label.spark.affinities;
 
-import com.google.gson.JsonObject;
 import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
-import net.imglib2.RandomAccessible;
+import net.imglib2.Point;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.labeling.affinities.ConnectedComponents;
+import net.imglib2.algorithm.labeling.affinities.Watersheds;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.converter.Converters;
+import net.imglib2.img.ImgFactory;
 import net.imglib2.img.array.ArrayImg;
+import net.imglib2.img.array.ArrayImgFactory;
 import net.imglib2.img.array.ArrayImgs;
 import net.imglib2.img.basictypeaccess.array.FloatArray;
 import net.imglib2.img.basictypeaccess.array.LongArray;
@@ -17,6 +20,7 @@ import net.imglib2.loops.LoopBuilder;
 import net.imglib2.type.label.Label;
 import net.imglib2.type.logic.BitType;
 import net.imglib2.type.logic.BoolType;
+import net.imglib2.type.numeric.integer.ByteType;
 import net.imglib2.type.numeric.integer.UnsignedLongType;
 import net.imglib2.type.numeric.real.FloatType;
 import net.imglib2.util.ConstantUtils;
@@ -54,10 +58,10 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
-
-public class Watersheds {
+public class SparkWatersheds {
 
 	private static final String RESOLUTION_KEY = "resolution";
 
@@ -162,7 +166,6 @@ public class Watersheds {
 				args.blockSize,
 				args.connectedComponents,
 				args.watershedSeedsMask,
-				args.watershedSeeds,
 				args.watersheds,
 				Optional.ofNullable(n5in.get().getAttribute(args.affinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)),
 				Optional.ofNullable(n5in.get().getAttribute(args.affinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]),
@@ -183,7 +186,6 @@ public class Watersheds {
 					args.affinities,
 					args.connectedComponents,
 					args.watershedSeedsMask,
-					args.watershedSeeds,
 					args.watersheds,
 					args.blockSize,
 					args.blocksPerTask);
@@ -203,7 +205,6 @@ public class Watersheds {
 			final String affinities,
 			final String connectedComponents,
 			final String watershedSeedsMask,
-			final String watershedSeeds,
 			final String watersheds,
 			final int[] blockSize,
 			final int[] blocksPerTask) throws IOException {
@@ -269,7 +270,27 @@ public class Watersheds {
 					LOG.info("Saving interval {} at min {} and max id {}", toString(Intervals.expand(labels, negativeHalo)), Intervals.minAsLongArray(t._1()), maxId);
 					long[] blockOffset = Intervals.minAsLongArray(t._1());
 					grid.getCellPosition(blockOffset, blockOffset);
+
 					N5Utils.saveBlock(Views.interval(labels, Intervals.expand(labels, negativeHalo)), n5out.get(), connectedComponents, attrs, blockOffset);
+
+					final long[][] invertedSteps = Stream.of(offsets).map(it -> LongStream.of(it).map(l -> -l)).toArray(long[][]::new);
+					final RandomAccessibleInterval<BitType> watershedSeedsMaskImg = ArrayImgs.bits(Intervals.dimensionsAsLongArray(unionFindMask));
+					Watersheds.seedsFromMask(Views.extendValue(unionFindMask, new BitType(true)), watershedSeedsMaskImg, Watersheds.symmetricOffsets(offsets));
+					final List<Point> seeds = Watersheds.collectSeeds(watershedSeedsMaskImg);
+
+					final RandomAccessibleInterval<ByteType> watershedSeedsMaskAsByte = Converters.convert(watershedSeedsMaskImg, (src, tgt) -> {
+						if (src.get()) tgt.setOne();
+						else tgt.setZero();
+					}, new ByteType());
+
+					N5Utils.saveBlock(Views.interval(watershedSeedsMaskAsByte, Intervals.expand(watershedSeedsMaskAsByte, negativeHalo)), n5out.get(), watershedSeedsMask, attrs, blockOffset);
+
+					final ImgFactory<FloatType> factory = new ArrayImgFactory<>(new FloatType());
+					final RandomAccessibleInterval<FloatType> symmetricAffinities = Watersheds.constructAffinities(t._2(), offsets, factory);
+					Watersheds.seededFromAffinities(Views.collapseReal(symmetricAffinities), labels, seeds, offsets);
+
+					N5Utils.saveBlock(Views.interval(labels, Intervals.expand(labels, negativeHalo)), n5out.get(), watersheds, attrs, blockOffset);
+
 					return new Tuple2<>(t, new Tuple3<>(affs, unionFindMask, labels));
 				})
 				.count();
@@ -283,7 +304,6 @@ public class Watersheds {
 			final int[] blockSize,
 			final String connectedComponents,
 			final String watershedSeedsMask,
-			final String watershedSeeds,
 			final String watersheds,
 			final double[] resolution,
 			final double[] offset,
@@ -291,10 +311,14 @@ public class Watersheds {
 	) throws IOException {
 
 		n5.createDataset(connectedComponents, dims, blockSize, DataType.UINT64, new GzipCompression());
+		n5.createDataset(watershedSeedsMask, dims, blockSize, DataType.INT8, new GzipCompression());
+		n5.createDataset(watersheds, dims, blockSize, DataType.UINT64, new GzipCompression());
 		n5.setAttribute(connectedComponents, RESOLUTION_KEY, resolution);
 		n5.setAttribute(connectedComponents, OFFSET_KEY, offset);
 		for (Map.Entry<String, ?> entry : additionalData.entrySet()) {
 			n5.setAttribute(connectedComponents, entry.getKey(), entry.getValue());
+			n5.setAttribute(watershedSeedsMask, entry.getKey(), entry.getValue());
+			n5.setAttribute(watersheds, entry.getKey(), entry.getValue());
 		}
 
 	}

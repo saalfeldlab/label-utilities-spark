@@ -5,7 +5,7 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import org.janelia.saalfeldlab.label.spark.LabelTools.Tool.FromString;
-import org.janelia.saalfeldlab.label.spark.affinities.Watersheds;
+import org.janelia.saalfeldlab.label.spark.affinities.SparkWatersheds;
 import org.janelia.saalfeldlab.label.spark.convert.ConvertToLabelMultisetType;
 import org.janelia.saalfeldlab.label.spark.downsample.SparkDownsampler;
 import org.janelia.saalfeldlab.label.spark.uniquelabels.ExtractUniqueLabelsPerBlock;
@@ -28,7 +28,7 @@ public class LabelTools
 		EXTRACT_UNIQUE_LABELS( ExtractUniqueLabelsPerBlock::run ),
 		DOWNSAMPLE_UNIQUE_LABELS( LabelListDownsampler::run ),
 		LABEL_TO_BLOCK_MAPPING( LabelToBlockMapping::run ),
-		AFFINITY_WATERSHEDS( Watersheds::run );
+		AFFINITY_WATERSHEDS( SparkWatersheds::run );
 
 		private interface ExceptionConsumer< T >
 		{
