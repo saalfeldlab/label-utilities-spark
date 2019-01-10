@@ -245,7 +245,8 @@ public class SparkWatersheds {
 					return affs;
 				})
 				.mapToPair(t -> {
-					final CompositeIntervalView<FloatType, RealComposite<FloatType>> affs = Views.collapseReal(t._2());
+					final RandomAccessibleInterval<FloatType> uncollapsedAffinities = t._2();
+					final CompositeIntervalView<FloatType, RealComposite<FloatType>> affs = Views.collapseReal(uncollapsedAffinities);
 					final RandomAccessibleInterval<BoolType> mask = ConstantUtils.constantRandomAccessibleInterval(new BoolType(true), affs.numDimensions(), affs);
 					final ArrayImg<UnsignedLongType, LongArray> labels = ArrayImgs.unsignedLongs(Intervals.dimensionsAsLongArray(affs));
 					labels.forEach(it -> it.set(Label.INVALID));
@@ -274,22 +275,20 @@ public class SparkWatersheds {
 					Watersheds.seedsFromMask(Views.extendValue(unionFindMask, new BitType(true)), watershedSeedsMaskImg, Watersheds.symmetricOffsets(offsets));
 					final List<Point> seeds = Watersheds.collectSeeds(watershedSeedsMaskImg);
 
-					final RandomAccessibleInterval<ByteType> watershedSeedsMaskAsByte = Converters.convert(watershedSeedsMaskImg, (src, tgt) -> {
-						if (src.get()) tgt.setOne();
-						else tgt.setZero();
-					}, new ByteType());
+					final RandomAccessibleInterval<ByteType> watershedSeedsMaskAsByte = Converters.convert(watershedSeedsMaskImg, (src, tgt) -> tgt.setInteger(src.get() ? 1 : 0), new ByteType());
 
-					final DatasetAttributes watershedSeedsMaskAttrs = new DatasetAttributes(outputDims, blockSize, DataType.UINT8, new GzipCompression());
+					final DatasetAttributes watershedSeedsMaskAttrs = new DatasetAttributes(outputDims, blockSize, DataType.INT8, new GzipCompression());
 					N5Utils.saveBlock(Views.interval(watershedSeedsMaskAsByte, Intervals.expand(watershedSeedsMaskAsByte, negativeHalo)), n5out.get(), watershedSeedsMask, watershedSeedsMaskAttrs, blockOffset);
 
 					final ImgFactory<FloatType> factory = new ArrayImgFactory<>(new FloatType());
-					final RandomAccessibleInterval<FloatType> symmetricAffinities = Watersheds.constructAffinities(t._2(), offsets, factory);
+					final RandomAccessibleInterval<FloatType> symmetricAffinities = Watersheds.constructAffinities(uncollapsedAffinities, offsets, factory);
+					// TODO use different priority queue to make more efficient
 					Watersheds.seededFromAffinities(Views.collapseReal(symmetricAffinities), labels, seeds, offsets);
 
 					final DatasetAttributes watershedsAttrs = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression());
 					N5Utils.saveBlock(Views.interval(labels, Intervals.expand(labels, negativeHalo)), n5out.get(), watersheds, watershedsAttrs, blockOffset);
 
-					return new Tuple2<>(t, new Tuple3<>(affs, unionFindMask, labels));
+					return new Tuple2<>(t._1(), new Tuple3<>(uncollapsedAffinities, unionFindMask, labels));
 				})
 				.count();
 		;
@@ -305,20 +304,31 @@ public class SparkWatersheds {
 			final String watersheds,
 			final double[] resolution,
 			final double[] offset,
-			final Map<String, ?> additionalData
+			final Map<String, Object> additionalData
 	) throws IOException {
 
-		n5.createDataset(connectedComponents, dims, blockSize, DataType.UINT64, new GzipCompression());
-		n5.createDataset(watershedSeedsMask, dims, blockSize, DataType.INT8, new GzipCompression());
-		n5.createDataset(watersheds, dims, blockSize, DataType.UINT64, new GzipCompression());
-		n5.setAttribute(connectedComponents, RESOLUTION_KEY, resolution);
-		n5.setAttribute(connectedComponents, OFFSET_KEY, offset);
-		for (Map.Entry<String, ?> entry : additionalData.entrySet()) {
-			n5.setAttribute(connectedComponents, entry.getKey(), entry.getValue());
-			n5.setAttribute(watershedSeedsMask, entry.getKey(), entry.getValue());
-			n5.setAttribute(watersheds, entry.getKey(), entry.getValue());
-		}
+		additionalData.put(RESOLUTION_KEY, resolution);
+		additionalData.put(OFFSET_KEY, offset);
+		prepareOutputDataset(n5, connectedComponents, dims, blockSize, DataType.UINT64, additionalData);
+		prepareOutputDataset(n5, watershedSeedsMask, dims, blockSize, DataType.INT8, with(with(additionalData, "min", 0.0), "max", 1.0));
+		prepareOutputDataset(n5, watersheds, dims, blockSize, DataType.UINT64, additionalData);
+	}
 
+	private static void prepareOutputDataset(
+			final N5Writer n5,
+			final String dataset,
+			final long[] dims,
+			final int[] blockSize,
+			final DataType dataType,
+			final Map<String, ?> additionalAttributes) throws IOException {
+		n5.createDataset(dataset, dims, blockSize, dataType, new GzipCompression());
+		for (Map.Entry<String, ?> entry : additionalAttributes.entrySet())
+			n5.setAttribute(dataset, entry.getKey(), entry.getValue());
+	}
+
+	private static <K, V> Map<K, V> with(Map<K, V> map, K key, V value) {
+		map.put(key, value);
+		return map;
 	}
 
 	private static class N5WriterSupplier implements Supplier<N5Writer>, Serializable {
