@@ -1,5 +1,10 @@
 package org.janelia.saalfeldlab.label.spark.affinities;
 
+import com.google.gson.annotations.Expose;
+import gnu.trove.map.hash.TIntIntHashMap;
+import gnu.trove.procedure.TIntProcedure;
+import gnu.trove.set.TIntSet;
+import gnu.trove.set.hash.TIntHashSet;
 import kotlin.Pair;
 import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
@@ -70,10 +75,13 @@ public class SparkRain {
 
 	private static final String OFFSET_KEY = "offset";
 
+	private static final String ARGUMENTS_KEY = "arguments";
+
 	private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
 	private static class Offset {
 
+		@Expose
 		private final long[] offset;
 
 		public Offset(final long... offset) {
@@ -92,38 +100,57 @@ public class SparkRain {
 
 	private static class Args {
 
+		@Expose
 		@CommandLine.Parameters(arity = "1", paramLabel = "INPUT_CONTAINER", description = "Path to N5 container with affinities dataset.")
 		String inputContainer = null;
 
+		@Expose
 		@CommandLine.Option(names = "--output-container", paramLabel = "OUTPUT_CONTAINER", description = "Path to output container. Defaults to INPUT_CONTAINER.")
 		String outputContainer = null;
 
+		@Expose
 		@CommandLine.Option(names = "--affinity-dataset", paramLabel = "AFFINITIES", description = "Path of affinities dataset in INPUT_CONTAINER.")
 		String affinities = "volumes/affinities/prediction";
 
+		@Expose
 		@CommandLine.Option(names = "--watersheds-dataset", paramLabel = "WATERSHEDS", description = "Path to watersheds in OUTPUT_CONTAINER")
 		String watersheds = "volumes/labels/watersheds";
 
-		@CommandLine.Option(names = "--merged-dataset", paramLabel = "WATERSHED_SEEDS_MASK", description = "Path to watershed seeds mask in OUTPUT_CONTAINER")
+		@Expose
+		@CommandLine.Option(names = "--merged-dataset", paramLabel = "WATERSHEDS_MERGED", description = "Path to region merged in OUTPUT_CONTAINER")
 		String merged = "volumes/labels/watersheds_merged";
 
+		@Expose
+		@CommandLine.Option(names = "--size-filtered-dataset", paramLabel = "SIZE_FILTERED", description = "Path to size_filtered in OUTPUT_CONTAINER (only if size filter is > 0)")
+		String sizeFiltered = "volumes/labels/size_filtered";
+
+		@Expose
 		@CommandLine.Option(names = "--invert-affinities-axis", paramLabel = "INVERT_AFFINITIES_AXIS", description = "Invert axis that holds affinities. This is necessary if affinities were generated as [z,y,x].")
 		Boolean invertAffinitiesAxis = false;
 
+		@Expose
 		@CommandLine.Option(names = "--threshold", paramLabel = "THRESHOLD", description = "Threshold for thresholding affinities. Defaults to 0.5.")
 		Double threshold = 0.5;
 
+		@Expose
 		@CommandLine.Option(names = "--offsets", arity = "1..*", paramLabel = "OFFSETS", description = "Structuring elements for affinities. Defaults to -1,0,0 0,-1,0 0,0,-1.")
 		Offset[] offsets = {new Offset(-1, 0, 0), new Offset(0, -1, 0), new Offset(0, 0, -1)};
 
+		@Expose
 		@CommandLine.Option(names = "--block-size", paramLabel = "BLOCK_SIZE", description = "Block size of output.", split = ",")
 		int[] blockSize = {64, 64, 64};
 
+		@Expose
 		@CommandLine.Option(names = "--blocks-per-task", paramLabel = "BLOCKS_PER_TASK", description = "How many blocks to combine for watersheds/connected components (one value per dimension)", split=",")
 		int[] blocksPerTask = {1, 1, 1};
 
+		@Expose
 		@CommandLine.Option(names = "--halo", paramLabel = "HALO", description = "Include halo region to run connected components/watersheds", split=",")
 		int[] halo = {0, 0, 0};
+
+		@Expose
+		@CommandLine.Option(names = "--size-filter", paramLabel = "MIN_SIZE", description = "Anything below this size will be considered background. Will be ignored if <= 0")
+		int minSize = -1;
 
 	}
 
@@ -157,15 +184,19 @@ public class SparkRain {
 					Arrays.toString(args.offsets),
 					Arrays.toString(inputDims)));
 
+		final Map<String, Object> attributes = new HashMap<String, Object>();
+		attributes.put(ARGUMENTS_KEY, args);
+
 		prepareOutputDatasets(
 				n5out.get(),
 				outputDims,
 				args.blockSize,
 				args.watersheds,
 				args.merged,
+				args.sizeFiltered,
 				Optional.ofNullable(n5in.get().getAttribute(args.affinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)),
 				Optional.ofNullable(n5in.get().getAttribute(args.affinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]),
-				new HashMap<>());
+				attributes);
 
 
 		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
@@ -178,10 +209,12 @@ public class SparkRain {
 					IntStream.of(args.halo).mapToLong(i -> i).toArray(),
 					args.invertAffinitiesAxis,
 					args.threshold,
+					args.minSize,
 					Stream.of(args.offsets).map(Offset::offset).toArray(long[][]::new),
 					args.affinities,
 					args.watersheds,
 					args.merged,
+					args.sizeFiltered,
 					args.blockSize,
 					args.blocksPerTask);
 		}
@@ -196,12 +229,14 @@ public class SparkRain {
 			final long[] halo,
 			final boolean invertAffinitiesAxis,
 			final double threshold,
+			final int minSize,
 			final long[][] offsets,
 			final String affinities,
 			final String watersheds,
 			final String merged,
+			final String sizeFiltered,
 			final int[] blockSize,
-			final int[] blocksPerTask) throws IOException {
+			final int[] blocksPerTask) {
 
 		final int numChannels = offsets.length;
 		final int[] watershedBlockSize = IntStream.range(0, blockSize.length).map(d -> blockSize[d] * blocksPerTask[d]).toArray();
@@ -303,7 +338,29 @@ public class SparkRain {
 					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), merged, watershedAttributes, blockOffset);
 
 
+					final RandomAccessibleInterval<UnsignedLongType> relevantLabels = Views.zeroMin(Views.interval(labels, relevantInterval));
+					final TIntIntHashMap counts = new TIntIntHashMap();
+					for (final UnsignedLongType vx : Views.iterable(relevantLabels)) {
+						final int v = vx.getInteger();
+						counts.put(v, counts.get(v) + 1);
+					}
 
+					LOG.info("Got counts: {}", counts);
+
+					if (minSize > 0) {
+						final TIntSet tooSmall = new TIntHashSet();
+						counts.forEachEntry((key, value) -> {
+							if (value < minSize)
+								tooSmall.add(key);
+							return true;
+						});
+
+						for (final UnsignedLongType vx : Views.iterable(relevantLabels)) {
+							if (tooSmall.contains(vx.getInteger()))
+								vx.setInteger(0);
+						}
+						N5Utils.saveBlock(relevantLabels, n5out.get(), sizeFiltered, watershedAttributes, blockOffset);
+					}
 
 					return new Tuple2<>(t._1(), parentsAndRoots);
 				})
@@ -318,6 +375,7 @@ public class SparkRain {
 			final int[] blockSize,
 			final String watersheds,
 			final String merged,
+			final String sizeFiltered,
 			final double[] resolution,
 			final double[] offset,
 			final Map<String, Object> additionalData
@@ -327,6 +385,7 @@ public class SparkRain {
 		additionalData.put(OFFSET_KEY, offset);
 		prepareOutputDataset(n5, watersheds, dims, blockSize, DataType.UINT64, additionalData);
 		prepareOutputDataset(n5, merged, dims, blockSize, DataType.UINT64, additionalData);
+		prepareOutputDataset(n5, sizeFiltered, dims, blockSize, DataType.UINT64, additionalData);
 	}
 
 	private static void prepareOutputDataset(
