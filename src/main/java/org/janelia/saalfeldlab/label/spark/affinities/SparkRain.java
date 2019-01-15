@@ -136,7 +136,7 @@ public class SparkRain {
 
 		@Expose
 		@CommandLine.Option(names = "--size-filter", paramLabel = "MIN_SIZE", description = "Anything below this size will be considered background. Will be ignored if <= 0")
-		int minSize = -1;
+		Integer minSize = -1;
 
 	}
 
