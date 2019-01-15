@@ -28,9 +28,11 @@ import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.janelia.saalfeldlab.n5.DataBlock;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
@@ -38,6 +40,7 @@ import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
+import pl.touk.throwing.ThrowingConsumer;
 import scala.Tuple2;
 
 import java.io.IOException;
@@ -142,6 +145,10 @@ public class SparkRain {
 		@CommandLine.Option(names = "--min-watershed-affinity", paramLabel = "MIN_WATERSHED_AFFINITY", description = "Ignore edges that have lower affinity than MIN_WATERSHED_AFFINITY")
 		Double minWatershedAffinity = Double.NEGATIVE_INFINITY;
 
+		@Expose
+		@CommandLine.Option(names = "--cropped-datasets-pattern", paramLabel = "CROPPED_DATASETS_PATTERN", description = "All data sets are stored with halo by default. Cropped versions according to this.", defaultValue = "%s-cropped")
+		String croppedDatasetPattern;
+
 	}
 
 	public static void main(final String[] argv) throws IOException {
@@ -177,16 +184,33 @@ public class SparkRain {
 		final Map<String, Object> attributes = new HashMap<String, Object>();
 		attributes.put(ARGUMENTS_KEY, args);
 
+		final int[] taskBlockSize = IntStream.range(0, args.blockSize.length).map(d -> args.blockSize[d] * args.blocksPerTask[d]).toArray();
+		final boolean hasHalo = Arrays.stream(args.halo).filter(h -> h != 0).count() > 0;
+		if (hasHalo)
+			throw new RuntimeException("Halo currently not supported, please omit halo option!");
+
+		if (hasHalo)
+			prepareOutputDatasets(
+					n5out.get(),
+					DataType.UINT64,
+					outputDims,
+					taskBlockSize,
+					Optional.ofNullable(n5in.get().getAttribute(args.affinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)),
+					Optional.ofNullable(n5in.get().getAttribute(args.affinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]),
+					attributes,
+					args.watersheds,
+					args.merged,
+					args.sizeFiltered);
+
 		prepareOutputDatasets(
 				n5out.get(),
+				DataType.UINT64,
 				outputDims,
 				args.blockSize,
-				args.watersheds,
-				args.merged,
-				args.sizeFiltered,
 				Optional.ofNullable(n5in.get().getAttribute(args.affinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)),
 				Optional.ofNullable(n5in.get().getAttribute(args.affinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]),
-				attributes);
+				attributes,
+				Stream.of(args.watersheds, args.merged, args.sizeFiltered).map(ds -> hasHalo ? String.format(args.croppedDatasetPattern, ds) : ds ).toArray(String[]::new));
 
 
 		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
@@ -206,6 +230,7 @@ public class SparkRain {
 					args.watersheds,
 					args.merged,
 					args.sizeFiltered,
+					args.croppedDatasetPattern,
 					args.blockSize,
 					args.blocksPerTask);
 		}
@@ -227,10 +252,12 @@ public class SparkRain {
 			final String watersheds,
 			final String merged,
 			final String sizeFiltered,
+			final String croppedDatasetPattern,
 			final int[] blockSize,
 			final int[] blocksPerTask) {
 
 		final int numChannels = offsets.length;
+		final boolean hasHalo = Arrays.stream(halo).filter(h -> h != 0).count() > 0;
 		final int[] watershedBlockSize = IntStream.range(0, blockSize.length).map(d -> blockSize[d] * blocksPerTask[d]).toArray();
 		final List<Tuple2<long[], long[]>> watershedBlocks = Grids
 				.collectAllContainedIntervals(outputDims, watershedBlockSize)
@@ -273,9 +300,14 @@ public class SparkRain {
 					final RandomAccessibleInterval<FloatType> uncollapsedAffinities = t._2();
 
 					final CellGrid grid = new CellGrid(outputDims, blockSize);
+					final CellGrid watershedsGrid = new CellGrid(outputDims, watershedBlockSize);
+					LOG.info("Got grids {} and {}", grid, watershedsGrid);
 
 					final long[] blockOffset = Intervals.minAsLongArray(block);
+					final long[] watershedsBlockOffset = blockOffset.clone();
 					grid.getCellPosition(blockOffset, blockOffset);
+					watershedsGrid.getCellPosition(watershedsBlockOffset, watershedsBlockOffset);
+					LOG.info("min={} blockOffset={} watershedsBlockOffset={}", Intervals.minAsLongArray(block), blockOffset, watershedsBlockOffset);
 
 					final int[] symmetricOrder = new int[offsets.length];
 					Arrays.setAll(symmetricOrder, d -> offsets.length - 1 - d);
@@ -306,15 +338,24 @@ public class SparkRain {
 					final long[] roots = parentsAndRoots.getSecond();
 
 					final long[] dims = Intervals.dimensionsAsLongArray(Views.collapseReal(symmetricAffinities));
-					final RandomAccessibleInterval<UnsignedLongType> labels = ArrayImgs.unsignedLongs(parentsAndRoots.getFirst(), dims);
+					final ArrayImg<UnsignedLongType, LongArray> labels = ArrayImgs.unsignedLongs(parentsAndRoots.getFirst(), dims);
 					final Interval relevantInterval = Intervals.expand(labels, negativeHalo);
-					final DatasetAttributes watershedAttributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression());
-					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), watersheds, watershedAttributes, blockOffset);
+
+					final DatasetAttributes croppedAttributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression());
+					final DatasetAttributes watershedAttributes = new DatasetAttributes(outputDims, watershedBlockSize, DataType.UINT64, new GzipCompression());
+
+					LOG.info("Saving cropped watersheds to {}", hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds);
+					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds, croppedAttributes, blockOffset);
+					if (hasHalo) {
+						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
+						LOG.info("Saving watershed block with halo to {}", watersheds);
+						n5out.get().writeBlock(watersheds, watershedAttributes, dataBlock);
+					}
 
 					final ArrayImg<BitType, LongArray> um = ArrayImgs.bits(dims);
 					final IntArrayUnionFind uf = new IntArrayUnionFind(roots.length);
 
-					final RandomAccessibleInterval<BitType> mask = Converters.convert(labels, (s, tgt) -> tgt.set(s.getIntegerLong() > 0), new BitType());
+					final RandomAccessibleInterval<BitType> mask = Converters.convert((RandomAccessibleInterval<UnsignedLongType>)labels, (s, tgt) -> tgt.set(s.getIntegerLong() > 0), new BitType());
 					final ConnectedComponents.ToIndex toIndex = (it, index) -> parents[(int) index];
 					ConnectedComponents.unionFindFromSymmetricAffinities(
 							Views.extendValue(mask, new BitType(false)),
@@ -325,7 +366,12 @@ public class SparkRain {
 							offsets,
 							toIndex);
 					Views.flatIterable(labels).forEach(vx -> vx.set(uf.findRoot(vx.getIntegerLong())));
-					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), merged, watershedAttributes, blockOffset);
+
+					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, merged) : merged, croppedAttributes, blockOffset);
+					if (hasHalo) {
+						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
+						n5out.get().writeBlock(merged, watershedAttributes, dataBlock);
+					}
 
 
 					final RandomAccessibleInterval<UnsignedLongType> relevantLabels = Views.zeroMin(Views.interval(labels, relevantInterval));
@@ -349,7 +395,11 @@ public class SparkRain {
 							if (tooSmall.contains(vx.getInteger()))
 								vx.setInteger(0);
 						}
-						N5Utils.saveBlock(relevantLabels, n5out.get(), sizeFiltered, watershedAttributes, blockOffset);
+						N5Utils.saveBlock(relevantLabels, n5out.get(), hasHalo ? String.format(croppedDatasetPattern, sizeFiltered) : sizeFiltered, croppedAttributes, blockOffset);
+						if (hasHalo) {
+							final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
+							n5out.get().writeBlock(sizeFiltered, watershedAttributes, dataBlock);
+						}
 					}
 
 					return new Tuple2<>(t._1(), parentsAndRoots);
@@ -361,21 +411,18 @@ public class SparkRain {
 
 	private static void prepareOutputDatasets(
 			final N5Writer n5,
+			final DataType dataType,
 			final long[] dims,
 			final int[] blockSize,
-			final String watersheds,
-			final String merged,
-			final String sizeFiltered,
 			final double[] resolution,
 			final double[] offset,
-			final Map<String, Object> additionalData
+			final Map<String, Object> additionalData,
+			final String... datasets
 	) throws IOException {
 
 		additionalData.put(RESOLUTION_KEY, resolution);
 		additionalData.put(OFFSET_KEY, offset);
-		prepareOutputDataset(n5, watersheds, dims, blockSize, DataType.UINT64, additionalData);
-		prepareOutputDataset(n5, merged, dims, blockSize, DataType.UINT64, additionalData);
-		prepareOutputDataset(n5, sizeFiltered, dims, blockSize, DataType.UINT64, additionalData);
+		Arrays.asList(datasets).forEach(ThrowingConsumer.unchecked(ds -> prepareOutputDataset(n5, ds, dims ,blockSize, dataType, additionalData)));
 	}
 
 	private static void prepareOutputDataset(
