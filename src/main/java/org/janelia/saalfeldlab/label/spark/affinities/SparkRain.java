@@ -335,7 +335,7 @@ public class SparkRain {
 						counts.put(v, counts.get(v) + 1);
 					}
 
-					LOG.info("Got counts: {}", counts);
+					LOG.debug("Got counts: {}", counts);
 
 					if (minSize > 0) {
 						final TIntSet tooSmall = new TIntHashSet();
