@@ -20,10 +20,13 @@ import net.imglib2.img.basictypeaccess.array.FloatArray;
 import net.imglib2.img.basictypeaccess.array.LongArray;
 import net.imglib2.img.cell.CellGrid;
 import net.imglib2.loops.LoopBuilder;
+import net.imglib2.type.NativeType;
 import net.imglib2.type.logic.BitType;
+import net.imglib2.type.numeric.IntegerType;
 import net.imglib2.type.numeric.integer.UnsignedLongType;
 import net.imglib2.type.numeric.real.FloatType;
 import net.imglib2.util.Intervals;
+import net.imglib2.util.Util;
 import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
@@ -48,11 +51,14 @@ import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.BiConsumer;
+import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -153,6 +159,10 @@ public class SparkRain {
 		@CommandLine.Option(names = "--cropped-datasets-pattern", paramLabel = "CROPPED_DATASETS_PATTERN", description = "All data sets are stored with halo by default. Cropped versions according to this.", defaultValue = "%s-cropped")
 		String croppedDatasetPattern;
 
+		@Expose
+		@CommandLine.Option(names = "--relabel", paramLabel = "RELABEL", description = "Relabel all label data sets for unique labels")
+		Boolean relabel = true;
+
 	}
 
 	public static void main(final String[] argv) throws IOException {
@@ -191,7 +201,7 @@ public class SparkRain {
 		final int[] taskBlockSize = IntStream.range(0, args.blockSize.length).map(d -> args.blockSize[d] * args.blocksPerTask[d]).toArray();
 		final boolean hasHalo = Arrays.stream(args.halo).filter(h -> h != 0).count() > 0;
 		if (hasHalo)
-			throw new RuntimeException("Halo currently not supported, please omit halo option!");
+			throw new UnsupportedOperationException("Halo currently not supported, please omit halo option!");
 
 		if (hasHalo)
 			prepareOutputDatasets(
@@ -238,7 +248,8 @@ public class SparkRain {
 					args.seededWatersheds,
 					args.croppedDatasetPattern,
 					args.blockSize,
-					args.blocksPerTask);
+					args.blocksPerTask,
+					args.relabel);
 		}
 
 	}
@@ -261,7 +272,8 @@ public class SparkRain {
 			final String seededWatersheds,
 			final String croppedDatasetPattern,
 			final int[] blockSize,
-			final int[] blocksPerTask) {
+			final int[] blocksPerTask,
+			final boolean relabel) {
 
 		final int numChannels = offsets.length;
 		final boolean hasHalo = Arrays.stream(halo).filter(h -> h != 0).count() > 0;
@@ -275,7 +287,7 @@ public class SparkRain {
 		final long[] negativeHalo = new long[halo.length];
 		Arrays.setAll(negativeHalo, d -> -halo[d]);
 
-		sc
+		final List<Tuple2<Tuple2<long[], long[]>, Integer>> idCounts = sc
 				.parallelize(watershedBlocks)
 				.map(t -> new FinalInterval(t._1(), t._2()))
 				.mapToPair(block -> new Tuple2<>(block, N5Utils.<FloatType>open(n5in.get(), affinities)))
@@ -297,7 +309,7 @@ public class SparkRain {
 							if (offset == 0)
 								continue;
 							final long pos = offset > 0 ? slice.max(d) + 1 - offset : slice.min(d) - 1 - offset;
-							Views.hyperSlice(slice, d, pos).forEach( p -> p.setReal(Float.NaN));
+							Views.hyperSlice(slice, d, pos).forEach(p -> p.setReal(Float.NaN));
 						}
 					}
 					return affs;
@@ -325,7 +337,7 @@ public class SparkRain {
 							symmetricOrder
 					);
 
-					final long[][] symmetricOffsets = new long[offsets.length*2][];
+					final long[][] symmetricOffsets = new long[offsets.length * 2][];
 					for (int index = 0; index < offsets.length; ++index) {
 						symmetricOffsets[index] = offsets[index].clone();
 						symmetricOffsets[index + offsets.length] = offsets[offsets.length - 1 - index].clone();
@@ -362,7 +374,7 @@ public class SparkRain {
 					final ArrayImg<BitType, LongArray> um = ArrayImgs.bits(dims);
 					final IntArrayUnionFind uf = new IntArrayUnionFind(roots.length);
 
-					final RandomAccessibleInterval<BitType> mask = Converters.convert((RandomAccessibleInterval<UnsignedLongType>)labels, (s, tgt) -> tgt.set(s.getIntegerLong() > 0), new BitType());
+					final RandomAccessibleInterval<BitType> mask = Converters.convert((RandomAccessibleInterval<UnsignedLongType>) labels, (s, tgt) -> tgt.set(s.getIntegerLong() > 0), new BitType());
 					final ConnectedComponents.ToIndex toIndex = (it, index) -> parents[(int) index];
 					ConnectedComponents.unionFindFromSymmetricAffinities(
 							Views.extendValue(mask, new BitType(false)),
@@ -429,11 +441,87 @@ public class SparkRain {
 //						n5out.get().writeBlock(seededWatersheds, watershedAttributes, dataBlock);
 //					}
 
-					return new Tuple2<>(t._1(), parentsAndRoots);
+					return new Tuple2<>(new Tuple2<>(Intervals.minAsLongArray(t._1()), Intervals.maxAsLongArray(t._1())), roots.length - 1);
 				})
-				.count();
-		;
+				.collect()
+				;
 
+		long startIndex = 1;
+		final List<Tuple2<Tuple2<long[], long[]>, Long>> idOffsets = new ArrayList<>();
+		for (final Tuple2<Tuple2<long[], long[]>, Integer> idCount : idCounts) {
+			idOffsets.add(new Tuple2<>(idCount._1(), startIndex));
+			startIndex += idCount._2();
+		}
+
+		if (relabel)
+			sc
+					.parallelizePairs(idOffsets)
+					.map(t -> {
+						final N5Writer n5 = n5out.get();
+						final Interval interval = new FinalInterval(t._1()._1(), t._1()._2());
+						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds, interval, t._2());
+						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, merged) : merged, interval, t._2());
+						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, t._2());
+						if (minSize > 0)
+							relabel(n5, hasHalo ? String.format(croppedDatasetPattern, sizeFiltered) : sizeFiltered, interval, t._2());
+
+						if (hasHalo)
+							throw new UnsupportedOperationException("Halo relabeling not implemented yet!");
+
+						// TODO do halo relabeling
+
+						return true;
+					})
+					.count();
+
+	}
+
+	private static void relabel(
+			final N5Writer n5,
+			final String dataset,
+			final Interval interval,
+			final long addIfNotZero) throws IOException {
+		SparkRain.<UnsignedLongType>relabel(n5, dataset, interval, (src, tgt) -> {
+			final long val = src.getIntegerLong();
+			tgt.set(val == 0 ? 0 : val + addIfNotZero);
+		});
+	}
+
+	private static <T extends IntegerType<T> & NativeType<T>> void relabel(
+			final N5Writer n5,
+			final String dataset,
+			final Interval interval,
+			final BiConsumer<T, T> idMapping) throws IOException {
+		final DatasetAttributes attributes = n5.getDatasetAttributes(dataset);
+		final CellGrid grid = new CellGrid(attributes.getDimensions(), attributes.getBlockSize());
+		final RandomAccessibleInterval<T> data = Views.interval(N5Utils.<T>open(n5, dataset), interval);
+		final RandomAccessibleInterval<T> copy = new ArrayImgFactory<>(Util.getTypeFromInterval(data).createVariable()).create(data);
+		LoopBuilder.setImages(data, copy).forEachPixel(idMapping);
+		final long[] blockPos = Intervals.minAsLongArray(interval);
+		grid.getCellPosition(blockPos, blockPos);
+		N5Utils.saveBlock(copy, n5, dataset, attributes, blockPos);
+	}
+
+	private static void relabel(
+			final N5Writer n5,
+			final String dataset,
+			final long[] blockPos,
+			final long addIfNonZero) throws IOException {
+		relabel(n5, dataset, blockPos, id -> id == 0 ? 0 : id + addIfNonZero);
+	}
+
+	private static void relabel(
+			final N5Writer n5,
+			final String dataset,
+			final long[] blockPos,
+			final LongUnaryOperator idMapping) throws IOException {
+		final DatasetAttributes attributes = n5.getDatasetAttributes(dataset);
+		final LongArrayDataBlock block = ((LongArrayDataBlock) n5.readBlock(dataset, attributes, blockPos));
+		final long[] data = block.getData();
+		for (int i = 0; i < data.length; ++i) {
+			data[i] = idMapping.applyAsLong(data[i]);
+		}
+		n5.writeBlock(dataset, attributes, new LongArrayDataBlock(block.getSize(), data, block.getGridPosition()));
 	}
 
 	private static void prepareOutputDatasets(
