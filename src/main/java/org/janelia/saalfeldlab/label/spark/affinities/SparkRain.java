@@ -321,11 +321,9 @@ public class SparkRain {
 
 					final ArrayImg<BitType, LongArray> um = ArrayImgs.bits(dims);
 					final IntArrayUnionFind uf = new IntArrayUnionFind(roots.length);
-//					for (int index = 0; index < parents.length; ++index)
-//						uf.join(uf.findRoot(index), uf.findRoot(parents[index]));
 
 					final RandomAccessibleInterval<BitType> mask = Converters.convert(labels, (s, tgt) -> tgt.set(s.getIntegerLong() > 0), new BitType());
-					final ToLongFunction<Localizable> toIndex = it -> parents[(int) IntervalIndexer.positionToIndex(it, um)];
+					final ConnectedComponents.ToIndex toIndex = (it, index) -> parents[(int) index];
 					ConnectedComponents.unionFindFromSymmetricAffinities(
 							Views.extendValue(mask, new BitType(false)),
 							Views.collapseReal(uncollapsedAffinities),
