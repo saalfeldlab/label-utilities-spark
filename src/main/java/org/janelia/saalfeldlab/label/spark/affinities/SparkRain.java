@@ -138,6 +138,10 @@ public class SparkRain {
 		@CommandLine.Option(names = "--size-filter", paramLabel = "MIN_SIZE", description = "Anything below this size will be considered background. Will be ignored if <= 0")
 		Integer minSize = -1;
 
+		@Expose
+		@CommandLine.Option(names = "--min-watershed-affinity", paramLabel = "MIN_WATERSHED_AFFINITY", description = "Ignore edges that have lower affinity than MIN_WATERSHED_AFFINITY")
+		Double minWatershedAffinity = Double.NEGATIVE_INFINITY;
+
 	}
 
 	public static void main(final String[] argv) throws IOException {
@@ -194,6 +198,7 @@ public class SparkRain {
 					outputDims,
 					IntStream.of(args.halo).mapToLong(i -> i).toArray(),
 					args.invertAffinitiesAxis,
+					args.minWatershedAffinity,
 					args.threshold,
 					args.minSize,
 					Stream.of(args.offsets).map(Offset::offset).toArray(long[][]::new),
@@ -214,6 +219,7 @@ public class SparkRain {
 			final long[] outputDims,
 			final long[] halo,
 			final boolean invertAffinitiesAxis,
+			final double minWatershedAffinity,
 			final double threshold,
 			final int minSize,
 			final long[][] offsets,
@@ -290,7 +296,7 @@ public class SparkRain {
 
 					final Pair<long[], long[]> parentsAndRoots = Watersheds.letItRain(
 							Views.collapseReal(symmetricAffinities),
-							v -> !Double.isNaN(v.getRealDouble()),
+							minWatershedAffinity > Double.NEGATIVE_INFINITY ? v -> !Double.isNaN(v.getRealDouble()) && v.getRealDouble() >= minWatershedAffinity : v -> !Double.isNaN(v.getRealDouble()),
 							(c, u) -> c.getRealDouble() > u.getRealDouble(),
 							new FloatType(Float.NEGATIVE_INFINITY),
 							symmetricOffsets
