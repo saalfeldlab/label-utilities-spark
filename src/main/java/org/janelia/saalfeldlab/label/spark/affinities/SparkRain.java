@@ -106,6 +106,10 @@ public class SparkRain {
 		String watersheds = "volumes/labels/watersheds";
 
 		@Expose
+		@CommandLine.Option(names = "--seeded-watersheds-dataset", paramLabel = "WATERSHEDS", description = "Path to watersheds in OUTPUT_CONTAINER")
+		String seededWatersheds = "volumes/labels/seeded_watersheds";
+
+		@Expose
 		@CommandLine.Option(names = "--merged-dataset", paramLabel = "WATERSHEDS_MERGED", description = "Path to region merged in OUTPUT_CONTAINER")
 		String merged = "volumes/labels/watersheds_merged";
 
@@ -200,7 +204,8 @@ public class SparkRain {
 					attributes,
 					args.watersheds,
 					args.merged,
-					args.sizeFiltered);
+					args.sizeFiltered,
+					args.seededWatersheds);
 
 		prepareOutputDatasets(
 				n5out.get(),
@@ -210,7 +215,7 @@ public class SparkRain {
 				Optional.ofNullable(n5in.get().getAttribute(args.affinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)),
 				Optional.ofNullable(n5in.get().getAttribute(args.affinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]),
 				attributes,
-				Stream.of(args.watersheds, args.merged, args.sizeFiltered).map(ds -> hasHalo ? String.format(args.croppedDatasetPattern, ds) : ds ).toArray(String[]::new));
+				Stream.of(args.watersheds, args.merged, args.sizeFiltered, args.seededWatersheds).map(ds -> hasHalo ? String.format(args.croppedDatasetPattern, ds) : ds ).toArray(String[]::new));
 
 
 		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
@@ -230,6 +235,7 @@ public class SparkRain {
 					args.watersheds,
 					args.merged,
 					args.sizeFiltered,
+					args.seededWatersheds,
 					args.croppedDatasetPattern,
 					args.blockSize,
 					args.blocksPerTask);
@@ -252,6 +258,7 @@ public class SparkRain {
 			final String watersheds,
 			final String merged,
 			final String sizeFiltered,
+			final String seededWatersheds,
 			final String croppedDatasetPattern,
 			final int[] blockSize,
 			final int[] blocksPerTask) {
@@ -301,13 +308,13 @@ public class SparkRain {
 
 					final CellGrid grid = new CellGrid(outputDims, blockSize);
 					final CellGrid watershedsGrid = new CellGrid(outputDims, watershedBlockSize);
-					LOG.info("Got grids {} and {}", grid, watershedsGrid);
+					LOG.debug("Got grids {} and {}", grid, watershedsGrid);
 
 					final long[] blockOffset = Intervals.minAsLongArray(block);
 					final long[] watershedsBlockOffset = blockOffset.clone();
 					grid.getCellPosition(blockOffset, blockOffset);
 					watershedsGrid.getCellPosition(watershedsBlockOffset, watershedsBlockOffset);
-					LOG.info("min={} blockOffset={} watershedsBlockOffset={}", Intervals.minAsLongArray(block), blockOffset, watershedsBlockOffset);
+					LOG.debug("min={} blockOffset={} watershedsBlockOffset={}", Intervals.minAsLongArray(block), blockOffset, watershedsBlockOffset);
 
 					final int[] symmetricOrder = new int[offsets.length];
 					Arrays.setAll(symmetricOrder, d -> offsets.length - 1 - d);
@@ -344,11 +351,11 @@ public class SparkRain {
 					final DatasetAttributes croppedAttributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression());
 					final DatasetAttributes watershedAttributes = new DatasetAttributes(outputDims, watershedBlockSize, DataType.UINT64, new GzipCompression());
 
-					LOG.info("Saving cropped watersheds to {}", hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds);
+					LOG.debug("Saving cropped watersheds to {}", hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds);
 					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds, croppedAttributes, blockOffset);
 					if (hasHalo) {
 						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
-						LOG.info("Saving watershed block with halo to {}", watersheds);
+						LOG.debug("Saving watershed block with halo to {}", watersheds);
 						n5out.get().writeBlock(watersheds, watershedAttributes, dataBlock);
 					}
 
@@ -374,9 +381,8 @@ public class SparkRain {
 					}
 
 
-					final RandomAccessibleInterval<UnsignedLongType> relevantLabels = Views.zeroMin(Views.interval(labels, relevantInterval));
 					final TIntIntHashMap counts = new TIntIntHashMap();
-					for (final UnsignedLongType vx : Views.iterable(relevantLabels)) {
+					for (final UnsignedLongType vx : Views.iterable(labels)) {
 						final int v = vx.getInteger();
 						counts.put(v, counts.get(v) + 1);
 					}
@@ -391,16 +397,37 @@ public class SparkRain {
 							return true;
 						});
 
-						for (final UnsignedLongType vx : Views.iterable(relevantLabels)) {
+						for (final UnsignedLongType vx : Views.iterable(labels)) {
 							if (tooSmall.contains(vx.getInteger()))
 								vx.setInteger(0);
 						}
+						final RandomAccessibleInterval<UnsignedLongType> relevantLabels = Views.zeroMin(Views.interval(labels, relevantInterval));
 						N5Utils.saveBlock(relevantLabels, n5out.get(), hasHalo ? String.format(croppedDatasetPattern, sizeFiltered) : sizeFiltered, croppedAttributes, blockOffset);
 						if (hasHalo) {
 							final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
 							n5out.get().writeBlock(sizeFiltered, watershedAttributes, dataBlock);
 						}
 					}
+
+					// TODO do seeded watersheds
+//					final RandomAccessibleInterval<BitType> watershedSeedsMaskImg = ArrayImgs.bits(Intervals.dimensionsAsLongArray(labels));
+//					final RandomAccessibleInterval<BitType> foreground = Converters.convert((RandomAccessibleInterval<UnsignedLongType>)labels, (src, tgt) -> tgt.set(src.getIntegerLong() != 0), new BitType());
+//					Watersheds.seedsFromMask(Views.extendValue(foreground, new BitType(true)), watershedSeedsMaskImg, Watersheds.symmetricOffsets(offsets));
+//					final List<Point> seeds = Watersheds.collectSeeds(watershedSeedsMaskImg);
+//					LOG.debug("Found watershed seeds {}", seeds);
+//
+//					Watersheds.seededFromAffinities(
+//							Views.collapseReal(symmetricAffinities),
+//							labels,
+//							seeds,
+//							offsets,
+//							new UnsignedLongType(0L));
+//
+//					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, croppedAttributes, blockOffset);
+//					if (hasHalo) {
+//						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
+//						n5out.get().writeBlock(seededWatersheds, watershedAttributes, dataBlock);
+//					}
 
 					return new Tuple2<>(t._1(), parentsAndRoots);
 				})
