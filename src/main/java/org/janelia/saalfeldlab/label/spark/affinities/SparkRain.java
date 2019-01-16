@@ -23,6 +23,7 @@ import net.imglib2.img.basictypeaccess.array.LongArray;
 import net.imglib2.img.cell.CellGrid;
 import net.imglib2.loops.LoopBuilder;
 import net.imglib2.type.NativeType;
+import net.imglib2.type.label.Label;
 import net.imglib2.type.logic.BitType;
 import net.imglib2.type.numeric.IntegerType;
 import net.imglib2.type.numeric.integer.UnsignedByteType;
@@ -410,10 +411,10 @@ public class SparkRain {
 							toIndex);
 					Views.flatIterable(labels).forEach(vx -> vx.set(uf.findRoot(vx.getIntegerLong())));
 
-					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, croppedAttributes, blockOffset);
+					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, merged) : merged, croppedAttributes, blockOffset);
 					if (hasHalo) {
 						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
-						n5out.get().writeBlock(watershedSeeds, watershedAttributes, dataBlock);
+						n5out.get().writeBlock(merged, watershedAttributes, dataBlock);
 					}
 
 
@@ -447,8 +448,7 @@ public class SparkRain {
 
 					// TODO do seeded watersheds
 					final RandomAccessibleInterval<BitType> watershedSeedsMaskImg = ArrayImgs.bits(Intervals.dimensionsAsLongArray(labels));
-					final RandomAccessibleInterval<BitType> foreground = Converters.convert((RandomAccessibleInterval<UnsignedLongType>)labels, (src, tgt) -> tgt.set(src.getIntegerLong() != 0), new BitType());
-					Watersheds.seedsFromMask(Views.extendValue(foreground, new BitType(true)), watershedSeedsMaskImg, Watersheds.symmetricOffsets(offsets));
+					Watersheds.seedsFromMask(Views.extendValue(labels, new UnsignedLongType(Label.OUTSIDE)), watershedSeedsMaskImg, Watersheds.symmetricOffsets(offsets));
 					final List<Point> seeds = Watersheds.collectSeeds(watershedSeedsMaskImg);
 					LOG.debug("Found watershed seeds {}", seeds);
 					final RandomAccessibleInterval<UnsignedByteType> watershedSeedsMaskImgUint8 = Converters.convert(watershedSeedsMaskImg, (src,tgt) -> tgt.set(src.get() ? 1 : 0), new UnsignedByteType());
