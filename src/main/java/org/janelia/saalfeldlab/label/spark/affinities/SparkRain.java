@@ -1,5 +1,6 @@
 package org.janelia.saalfeldlab.label.spark.affinities;
 
+import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.Expose;
 import gnu.trove.map.hash.TIntIntHashMap;
 import gnu.trove.set.TIntSet;
@@ -569,7 +570,7 @@ public class SparkRain {
 		public N5Writer get() {
 			try {
 				return Files.isDirectory(Paths.get(container))
-						? new N5FSWriter(container)
+						? new N5FSWriter(container, new GsonBuilder().setPrettyPrinting().serializeSpecialFloatingPointValues())
 						: new N5HDF5Writer(container);
 			} catch (final IOException e) {
 				throw new RuntimeException(e);
