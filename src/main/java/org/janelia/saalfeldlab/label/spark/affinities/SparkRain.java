@@ -12,6 +12,8 @@ import net.imglib2.Point;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.labeling.affinities.ConnectedComponents;
 import net.imglib2.algorithm.labeling.affinities.Watersheds;
+import net.imglib2.algorithm.labeling.queue.HierarchicalPriorityQueueQuantized;
+import net.imglib2.algorithm.labeling.queue.PriorityQueueFactory;
 import net.imglib2.algorithm.util.Grids;
 import net.imglib2.algorithm.util.unionfind.IntArrayUnionFind;
 import net.imglib2.converter.Converters;
@@ -460,12 +462,16 @@ public class SparkRain {
 //						n5out.get().writeBlock(watershedSeeds, watershedAttributes, dataBlock);
 					}
 
-//					Watersheds.seededFromAffinities(
-//							Views.collapseReal(symmetricAffinities),
-//							labels,
-//							seeds,
-//							offsets,
-//							new UnsignedLongType(0L));
+					PriorityQueueFactory qFac = new HierarchicalPriorityQueueQuantized.Factory(1, -10, 10);
+
+					Watersheds.seededFromAffinities(
+							Views.collapseReal(symmetricAffinities),
+							labels,
+							seeds,
+							offsets,
+							new UnsignedLongType(0L),
+							aff -> !Double.isNaN(aff) && aff > 0.0,
+							qFac);
 
 					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, croppedAttributes, blockOffset);
 					if (hasHalo) {
