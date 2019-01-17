@@ -10,10 +10,9 @@ import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
 import net.imglib2.Point;
 import net.imglib2.RandomAccessibleInterval;
+import net.imglib2.algorithm.gauss3.Gauss3;
 import net.imglib2.algorithm.labeling.affinities.ConnectedComponents;
 import net.imglib2.algorithm.labeling.affinities.Watersheds;
-import net.imglib2.algorithm.labeling.queue.HierarchicalPriorityQueueQuantized;
-import net.imglib2.algorithm.labeling.queue.PriorityQueueFactory;
 import net.imglib2.algorithm.util.Grids;
 import net.imglib2.algorithm.util.unionfind.IntArrayUnionFind;
 import net.imglib2.converter.Converters;
@@ -34,6 +33,7 @@ import net.imglib2.type.numeric.real.FloatType;
 import net.imglib2.util.Intervals;
 import net.imglib2.util.Util;
 import net.imglib2.view.IntervalView;
+import net.imglib2.view.MixedTransformView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -50,7 +50,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 import pl.touk.throwing.ThrowingBiConsumer;
-import pl.touk.throwing.ThrowingConsumer;
 import scala.Tuple2;
 
 import java.io.IOException;
@@ -69,6 +68,7 @@ import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 public class SparkRain {
@@ -180,6 +180,14 @@ public class SparkRain {
 		@CommandLine.Option(names = "--revert-array-attributes", paramLabel = "RELABEL", description = "Revert all array attributes (that are not dataset attributes)", defaultValue = "false")
 		Boolean revertArrayAttributes;
 
+		@Expose
+		@CommandLine.Option(names = "--smooth-affinities", paramLabel = "SIGMA", description = "Smooth affinities before watersheds (if SIGMA > 0)", defaultValue = "0.0")
+		Double smoothAffinitiesSigma;
+
+		@Expose
+		@CommandLine.Option(names = "--smoothed-affinities-dataset", defaultValue = "volumes/affinities/prediction_smoothed")
+		String smoothedAffinities;
+
 
 	}
 
@@ -225,31 +233,32 @@ public class SparkRain {
 		String[] uint64Datasets = args.minSize > 0
 				? new String[] {args.watersheds, args.merged, args.seededWatersheds, args.sizeFiltered}
 				: new String[] {args.watersheds, args.merged, args.seededWatersheds};
-
 		String[] uint8Datasets = {args.watershedSeeds};
+
+		String[] float32Datasets = args.smoothAffinitiesSigma > 0 ? new String[] {args.smoothedAffinities} : new String[] {};
+
 		final double[] resolution = reverted(Optional.ofNullable(n5in.get().getAttribute(args.affinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)), args.revertArrayAttributes);
 		final double[] offset = reverted(Optional.ofNullable(n5in.get().getAttribute(args.affinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]), args.revertArrayAttributes);
 		attributes.put(RESOLUTION_KEY, resolution);
 		attributes.put(OFFSET_KEY, offset);
 
-		final Map<String, DataType> datasets = new HashMap<>();
-		Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, DataType.UINT64));
-		Arrays.asList(uint8Datasets).forEach(ds -> datasets.put(ds, DataType.UINT8));
+		final Map<String, DatasetAttributes> datasets = new HashMap<>();
+		Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT64, new GzipCompression())));
+		Arrays.asList(uint8Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT8, new GzipCompression())));
+
+		if (args.smoothAffinitiesSigma > 0.0)
+			prepareOutputDataset(n5out.get(), args.smoothedAffinities, new DatasetAttributes(inputDims, IntStream.concat(IntStream.of(args.blockSize), IntStream.of(1)).toArray(), DataType.FLOAT32, new GzipCompression()), attributes);
 
 		if (hasHalo) {
 			prepareOutputDatasets(
 					n5out.get(),
-					datasets,
-					outputDims,
-					taskBlockSize,
+					datasets.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> new DatasetAttributes(e.getValue().getDimensions(), taskBlockSize, e.getValue().getDataType(), e.getValue().getCompression()))),
 					attributes);
 		}
 
 		prepareOutputDatasets(
 				n5out.get(),
 				datasets.entrySet().stream().collect(Collectors.toMap(entry -> hasHalo ? String.format(args.croppedDatasetPattern, entry.getKey()) : entry.getKey(), Map.Entry::getValue)),
-				outputDims,
-				args.blockSize,
 				attributes);
 
 
@@ -266,7 +275,9 @@ public class SparkRain {
 					args.threshold,
 					args.minSize,
 					Stream.of(args.offsets).map(Offset::offset).toArray(long[][]::new),
+					args.smoothAffinitiesSigma,
 					args.affinities,
+					args.smoothedAffinities,
 					args.watersheds,
 					args.merged,
 					args.sizeFiltered,
@@ -291,7 +302,9 @@ public class SparkRain {
 			final double threshold,
 			final int minSize,
 			final long[][] offsets,
+			final double smoothAffinitiesSigma,
 			final String affinities,
+			final String smoothedAffinities,
 			final String watersheds,
 			final String merged,
 			final String sizeFiltered,
@@ -323,7 +336,27 @@ public class SparkRain {
 					final Interval withHalo = Intervals.expand(t._1(), halo);
 					final Interval withHaloAndChannels = addDimension(withHalo, 0, offsets.length);
 					final ArrayImg<FloatType, FloatArray> affinityCrop = ArrayImgs.floats(Intervals.dimensionsAsLongArray(withHaloAndChannels));
-					LoopBuilder.setImages(affinityCrop, Views.interval(Views.extendValue(t._2(), new FloatType(Float.NaN)), withHaloAndChannels)).forEachPixel(FloatType::set);
+					if (smoothAffinitiesSigma > 0.0) {
+						final int chanelDim = affinityCrop.numDimensions() - 1;
+						for (long pos = 0; pos < offsets.length; ++pos) {
+							final IntervalView<FloatType> targetSlice = Views.hyperSlice(Views.translate(affinityCrop, Intervals.minAsLongArray(withHaloAndChannels)), chanelDim, pos);
+							final MixedTransformView<FloatType> sourceSlice = Views.hyperSlice(Views.extendBorder(t._2()), chanelDim, pos);
+							Gauss3.gauss(smoothAffinitiesSigma, sourceSlice, targetSlice);
+						}
+						long[] affinityDims = LongStream.concat(LongStream.of(outputDims), LongStream.of(offsets.length)).toArray();
+						int[] affinityBlockSize = IntStream.concat(IntStream.of(blockSize), IntStream.of(1)).toArray();
+						final DatasetAttributes attributes = new DatasetAttributes(affinityDims, affinityBlockSize, DataType.FLOAT32, new GzipCompression());
+						final CellGrid grid = new CellGrid(affinityDims, affinityBlockSize);
+						final long[] blockOffset = Intervals.minAsLongArray(addDimension(t._1(),0, offsets.length));
+						grid.getCellPosition(blockOffset, blockOffset);
+						final long[] negativeHaloWithChannels = LongStream.concat(LongStream.of(negativeHalo), LongStream.of(0)).toArray();
+						N5Utils.saveBlock(Views.interval(affinityCrop, Intervals.expand(affinityCrop, negativeHaloWithChannels)), n5out.get(), smoothedAffinities, attributes, blockOffset);
+						if (hasHalo) {
+							throw new UnsupportedOperationException("Halo support not yet implemented!");
+						}
+					} else {
+						LoopBuilder.setImages(affinityCrop, Views.interval(Views.extendValue(t._2(), new FloatType(Float.NaN)), withHaloAndChannels)).forEachPixel(FloatType::set);
+					}
 					return new Tuple2<>(t._1(), affinityCrop);
 				})
 				.mapValues(affs -> {
@@ -364,13 +397,14 @@ public class SparkRain {
 							symmetricOrder
 					);
 
-					final long[][] symmetricOffsets = new long[offsets.length * 2][];
-					for (int index = 0; index < offsets.length; ++index) {
-						symmetricOffsets[index] = offsets[index].clone();
-						symmetricOffsets[index + offsets.length] = offsets[offsets.length - 1 - index].clone();
-						for (int d = 0; d < symmetricOffsets[index + offsets.length].length; ++d)
-							symmetricOffsets[index + offsets.length][d] *= -1;
-					}
+//					final long[][] symmetricOffsets = new long[offsets.length * 2][];
+//					for (int index = 0; index < offsets.length; ++index) {
+//						symmetricOffsets[index] = offsets[index].clone();
+//						symmetricOffsets[index + offsets.length] = offsets[offsets.length - 1 - index].clone();
+//						for (int d = 0; d < symmetricOffsets[index + offsets.length].length; ++d)
+//							symmetricOffsets[index + offsets.length][d] *= -1;
+//					}
+					final long[][] symmetricOffsets = Watersheds.symmetricOffsets(Watersheds.SymmetricOffsetOrder.ABCCBA, offsets);
 
 					final Pair<long[], long[]> parentsAndRoots = Watersheds.letItRain(
 							Views.collapseReal(symmetricAffinities),
@@ -450,7 +484,7 @@ public class SparkRain {
 
 					// TODO do seeded watersheds
 					final RandomAccessibleInterval<BitType> watershedSeedsMaskImg = ArrayImgs.bits(Intervals.dimensionsAsLongArray(labels));
-					Watersheds.seedsFromMask(Views.extendValue(labels, new UnsignedLongType(Label.OUTSIDE)), watershedSeedsMaskImg, Watersheds.symmetricOffsets(offsets));
+					Watersheds.seedsFromMask(Views.extendValue(labels, new UnsignedLongType(Label.OUTSIDE)), watershedSeedsMaskImg, symmetricOffsets);
 					final List<Point> seeds = Watersheds.collectSeeds(watershedSeedsMaskImg);
 					LOG.debug("Found watershed seeds {}", seeds);
 					final RandomAccessibleInterval<UnsignedByteType> watershedSeedsMaskImgUint8 = Converters.convert(watershedSeedsMaskImg, (src,tgt) -> tgt.set(src.get() ? 1 : 0), new UnsignedByteType());
@@ -462,16 +496,14 @@ public class SparkRain {
 //						n5out.get().writeBlock(watershedSeeds, watershedAttributes, dataBlock);
 					}
 
-					PriorityQueueFactory qFac = new HierarchicalPriorityQueueQuantized.Factory(1, -10, 10);
-
+					LOG.debug("Starting seeded watersheds with offsets {}", (Object) symmetricOffsets);
 					Watersheds.seededFromAffinities(
 							Views.collapseReal(symmetricAffinities),
 							labels,
 							seeds,
-							offsets,
+							symmetricOffsets,
 							new UnsignedLongType(0L),
-							aff -> !Double.isNaN(aff) && aff > 0.0,
-							qFac);
+							aff -> !Double.isNaN(aff));
 
 					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, croppedAttributes, blockOffset);
 					if (hasHalo) {
@@ -564,23 +596,19 @@ public class SparkRain {
 
 	private static void prepareOutputDatasets(
 			final N5Writer n5,
-			final Map<String, DataType> datasets,
-			final long[] dims,
-			final int[] blockSize,
+			final Map<String, DatasetAttributes> datasets,
 			final Map<String, Object> additionalData
 	) throws IOException {
 
-		datasets.forEach(ThrowingBiConsumer.unchecked((ds, dt) -> prepareOutputDataset(n5, ds, dims ,blockSize, dt, additionalData)));
+		datasets.forEach(ThrowingBiConsumer.unchecked((ds, dt) -> prepareOutputDataset(n5, ds, dt, additionalData)));
 	}
 
 	private static void prepareOutputDataset(
 			final N5Writer n5,
 			final String dataset,
-			final long[] dims,
-			final int[] blockSize,
-			final DataType dataType,
+			final DatasetAttributes attributes,
 			final Map<String, ?> additionalAttributes) throws IOException {
-		n5.createDataset(dataset, dims, blockSize, dataType, new GzipCompression());
+		n5.createDataset(dataset, attributes);
 		for (Map.Entry<String, ?> entry : additionalAttributes.entrySet())
 			n5.setAttribute(dataset, entry.getKey(), entry.getValue());
 	}
