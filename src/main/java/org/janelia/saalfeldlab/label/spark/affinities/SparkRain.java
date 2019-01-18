@@ -37,6 +37,7 @@ import net.imglib2.view.MixedTransformView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.janelia.saalfeldlab.label.spark.Version;
 import org.janelia.saalfeldlab.n5.DataBlock;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
@@ -80,6 +81,10 @@ public class SparkRain {
 	private static final String ARGUMENTS_KEY = "arguments";
 
 	private static final String ARGV_KEY = "argumentVector";
+
+	private static final String LABEL_UTILITIES_SPARK_KEY = "label-utilities-spark";
+
+	private static final String VERSION_KEY = "version";
 
 	private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -142,7 +147,7 @@ public class SparkRain {
 
 		@Expose
 		@CommandLine.Option(names = "--threshold", paramLabel = "THRESHOLD", description = "Threshold for thresholding affinities. Defaults to 0.5.")
-		Double threshold = 0.5;
+		Double threshold = 0.9;
 
 		@Expose
 		@CommandLine.Option(names = "--offsets", arity = "1..*", paramLabel = "OFFSETS", description = "Structuring elements for affinities. Defaults to -1,0,0 0,-1,0 0,0,-1.")
@@ -188,7 +193,6 @@ public class SparkRain {
 		@CommandLine.Option(names = "--smoothed-affinities-dataset", defaultValue = "volumes/affinities/prediction_smoothed")
 		String smoothedAffinities;
 
-
 	}
 
 	public static void main(final String[] argv) throws IOException {
@@ -221,9 +225,12 @@ public class SparkRain {
 					Arrays.toString(args.offsets),
 					Arrays.toString(inputDims)));
 
-		final Map<String, Object> attributes = new HashMap<String, Object>();
-		attributes.put(ARGUMENTS_KEY, args);
-		attributes.put(ARGV_KEY, argv);
+		final Map<String, Object> labelUtilitiesSparkAttributes = new HashMap<String, Object>();
+		labelUtilitiesSparkAttributes.put(ARGUMENTS_KEY, args);
+		labelUtilitiesSparkAttributes.put(ARGV_KEY, argv);
+		labelUtilitiesSparkAttributes.put(VERSION_KEY, Version.VERSION_STRING);
+		final Map<String, Object> attributes = with(new HashMap<>(), LABEL_UTILITIES_SPARK_KEY, labelUtilitiesSparkAttributes);
+
 
 		final int[] taskBlockSize = IntStream.range(0, args.blockSize.length).map(d -> args.blockSize[d] * args.blocksPerTask[d]).toArray();
 		final boolean hasHalo = Arrays.stream(args.halo).filter(h -> h != 0).count() > 0;
