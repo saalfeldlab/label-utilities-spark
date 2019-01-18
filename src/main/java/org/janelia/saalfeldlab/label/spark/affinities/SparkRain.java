@@ -65,6 +65,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -107,7 +108,7 @@ public class SparkRain {
 		}
 	}
 
-	private static class Args {
+	private static class Args implements Serializable {
 
 		@Expose
 		@CommandLine.Parameters(arity = "1", paramLabel = "INPUT_CONTAINER", description = "Path to N5 container with affinities dataset.")
@@ -193,6 +194,12 @@ public class SparkRain {
 		@CommandLine.Option(names = "--smoothed-affinities-dataset", defaultValue = "volumes/affinities/prediction_smoothed")
 		String smoothedAffinities;
 
+		@CommandLine.Option(names = "--json-pretty-print", defaultValue = "true")
+		transient Boolean prettyPrint;
+
+		@CommandLine.Option(names = "--json-disable-html-escape", defaultValue = "true")
+		transient Boolean disbaleHtmlEscape;
+
 	}
 
 	public static void main(final String[] argv) throws IOException {
@@ -208,11 +215,11 @@ public class SparkRain {
 				.registerConverter(Offset.class, it -> new Offset(Stream.of(it.split(",")).mapToLong(Long::parseLong).toArray()));
 		cmdLine.parse(argv);
 
-		final N5WriterSupplier n5in = new N5WriterSupplier(args.inputContainer);
+		final N5WriterSupplier n5in = new N5WriterSupplier(args.inputContainer, args.prettyPrint, args.disbaleHtmlEscape);
 
 		final N5WriterSupplier n5out = args.outputContainer == null
 				? n5in
-				: new N5WriterSupplier(args.outputContainer);
+				: new N5WriterSupplier(args.outputContainer, args.prettyPrint, args.disbaleHtmlEscape);
 
 		final DatasetAttributes inputAttributes = n5in.get().getDatasetAttributes(args.affinities);
 		final long[] inputDims = inputAttributes.getDimensions();
@@ -320,7 +327,7 @@ public class SparkRain {
 			final String croppedDatasetPattern,
 			final int[] blockSize,
 			final int[] blocksPerTask,
-			final boolean relabel) {
+			final boolean relabel) throws IOException {
 
 		final int numChannels = offsets.length;
 		final boolean hasHalo = Arrays.stream(halo).filter(h -> h != 0).count() > 0;
@@ -530,7 +537,7 @@ public class SparkRain {
 			startIndex += idCount._2();
 		}
 
-		if (relabel)
+		if (relabel) {
 			sc
 					.parallelizePairs(idOffsets)
 					.map(t -> {
@@ -550,6 +557,17 @@ public class SparkRain {
 						return true;
 					})
 					.count();
+			final long maxId = startIndex;
+			final N5Writer n5 = n5out.get();
+			n5.setAttribute(hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds, "maxId", maxId);
+			n5.setAttribute(hasHalo ? String.format(croppedDatasetPattern, merged) : merged, "maxId", maxId);
+			n5.setAttribute(hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, "maxId", maxId);
+			if (minSize > 0)
+				n5.setAttribute(hasHalo ? String.format(croppedDatasetPattern, sizeFiltered) : sizeFiltered, "maxId", maxId);
+
+			if (hasHalo)
+				throw new UnsupportedOperationException("Halo relabeling not implemented yet!");
+		}
 
 	}
 
@@ -629,19 +647,48 @@ public class SparkRain {
 
 		private final String container;
 
-		private N5WriterSupplier(String container) {
+		private final boolean withPrettyPrinting;
+
+		private final boolean disableHtmlEscaping;
+
+		private final boolean serializeSpecialFloatingPointValues = true;
+
+		private N5WriterSupplier(final String container, final boolean withPrettyPrinting, final boolean disableHtmlEscaping) {
 			this.container = container;
+			this.withPrettyPrinting = withPrettyPrinting;
+			this.disableHtmlEscaping = disableHtmlEscaping;
 		}
 
 		@Override
 		public N5Writer get() {
+
 			try {
 				return Files.isDirectory(Paths.get(container))
-						? new N5FSWriter(container, new GsonBuilder().setPrettyPrinting().serializeSpecialFloatingPointValues().disableHtmlEscaping())
+						? new N5FSWriter(container, createaBuilder())
 						: new N5HDF5Writer(container);
 			} catch (final IOException e) {
 				throw new RuntimeException(e);
 			}
+		}
+
+		private GsonBuilder createaBuilder() {
+			return serializeSpecialFloatingPointValues(withPrettyPrinting(disableHtmlEscaping(new GsonBuilder())));
+		}
+
+		private GsonBuilder serializeSpecialFloatingPointValues(final GsonBuilder builder) {
+			return with(builder, this.serializeSpecialFloatingPointValues, GsonBuilder::serializeSpecialFloatingPointValues);
+		}
+
+		private GsonBuilder withPrettyPrinting(final GsonBuilder builder) {
+			return with(builder, this.withPrettyPrinting, GsonBuilder::setPrettyPrinting);
+		}
+
+		private GsonBuilder disableHtmlEscaping(final GsonBuilder builder) {
+			return with(builder, this.disableHtmlEscaping, GsonBuilder::disableHtmlEscaping);
+		}
+
+		private static GsonBuilder with(final GsonBuilder builder, boolean applyAction, Function<GsonBuilder, GsonBuilder> action) {
+			return applyAction ? action.apply(builder) : builder;
 		}
 	}
 
