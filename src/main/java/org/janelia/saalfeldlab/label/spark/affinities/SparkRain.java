@@ -9,6 +9,7 @@ import kotlin.Pair;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
 import net.imglib2.Point;
+import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.gauss3.Gauss3;
 import net.imglib2.algorithm.labeling.affinities.ConnectedComponents;
@@ -27,6 +28,7 @@ import net.imglib2.type.NativeType;
 import net.imglib2.type.label.Label;
 import net.imglib2.type.logic.BitType;
 import net.imglib2.type.numeric.IntegerType;
+import net.imglib2.type.numeric.RealType;
 import net.imglib2.type.numeric.integer.UnsignedByteType;
 import net.imglib2.type.numeric.integer.UnsignedLongType;
 import net.imglib2.type.numeric.real.FloatType;
@@ -200,6 +202,9 @@ public class SparkRain {
 		@CommandLine.Option(names = "--json-disable-html-escape", defaultValue = "true")
 		transient Boolean disbaleHtmlEscape;
 
+		@CommandLine.Option(names = { "-h", "--help"}, usageHelp = true, description = "Display this help and exit")
+		private Boolean help;
+
 	}
 
 	public static void main(final String[] argv) throws IOException {
@@ -214,6 +219,10 @@ public class SparkRain {
 		final CommandLine cmdLine = new CommandLine(args)
 				.registerConverter(Offset.class, it -> new Offset(Stream.of(it.split(",")).mapToLong(Long::parseLong).toArray()));
 		cmdLine.parse(argv);
+		if (cmdLine.isUsageHelpRequested()) {
+			cmdLine.usage(System.err);
+			System.exit(0);
+		}
 
 		final N5WriterSupplier n5in = new N5WriterSupplier(args.inputContainer, args.prettyPrint, args.disbaleHtmlEscape);
 
@@ -348,49 +357,24 @@ public class SparkRain {
 				.mapValues(affs -> invertAffinitiesAxis ? Views.zeroMin(Views.invertAxis(affs, affs.numDimensions() - 1)) : affs)
 				.mapToPair(t -> {
 					final Interval withHalo = Intervals.expand(t._1(), halo);
-					final Interval withHaloAndChannels = addDimension(withHalo, 0, offsets.length);
+					final Interval withHaloAndChannels = addDimension(withHalo, 0, offsets.length - 1);
 					final ArrayImg<FloatType, FloatArray> affinityCrop = ArrayImgs.floats(Intervals.dimensionsAsLongArray(withHaloAndChannels));
-					if (smoothAffinitiesSigma > 0.0) {
-						final int chanelDim = affinityCrop.numDimensions() - 1;
-						for (long pos = 0; pos < offsets.length; ++pos) {
-							final IntervalView<FloatType> targetSlice = Views.hyperSlice(Views.translate(affinityCrop, Intervals.minAsLongArray(withHaloAndChannels)), chanelDim, pos);
-							final MixedTransformView<FloatType> sourceSlice = Views.hyperSlice(Views.extendBorder(t._2()), chanelDim, pos);
-							Gauss3.gauss(smoothAffinitiesSigma, sourceSlice, targetSlice);
-						}
-						long[] affinityDims = LongStream.concat(LongStream.of(outputDims), LongStream.of(offsets.length)).toArray();
-						int[] affinityBlockSize = IntStream.concat(IntStream.of(blockSize), IntStream.of(1)).toArray();
-						final DatasetAttributes attributes = new DatasetAttributes(affinityDims, affinityBlockSize, DataType.FLOAT32, new GzipCompression());
-						final CellGrid grid = new CellGrid(affinityDims, affinityBlockSize);
-						final long[] blockOffset = Intervals.minAsLongArray(addDimension(t._1(),0, offsets.length));
-						grid.getCellPosition(blockOffset, blockOffset);
-						final long[] negativeHaloWithChannels = LongStream.concat(LongStream.of(negativeHalo), LongStream.of(0)).toArray();
-						N5Utils.saveBlock(Views.interval(affinityCrop, Intervals.expand(affinityCrop, negativeHaloWithChannels)), n5out.get(), smoothedAffinities, attributes, blockOffset);
-						if (hasHalo) {
-							throw new UnsupportedOperationException("Halo support not yet implemented!");
-						}
-					} else {
-						LoopBuilder.setImages(affinityCrop, Views.interval(Views.extendValue(t._2(), new FloatType(Float.NaN)), withHaloAndChannels)).forEachPixel(FloatType::set);
-					}
-					return new Tuple2<>(t._1(), affinityCrop);
+					LoopBuilder.setImages(affinityCrop, Views.interval(Views.extendValue(t._2(), new FloatType(Float.NaN)), withHaloAndChannels)).forEachPixel(FloatType::set);
+					return smoothAffinitiesSigma > 0.0
+						? new Tuple2<>(t._1(), new Tuple2<>(affinityCrop, smooth(t._2(), withHaloAndChannels, withHaloAndChannels.numDimensions() - 1, smoothAffinitiesSigma)))
+						: new Tuple2<>(t._1(), new Tuple2<>(affinityCrop, (ArrayImg<FloatType, FloatArray>) null));
 				})
 				.mapValues(affs -> {
 					// TODO how to avoid looking outside interval?
 					// TODO optimize this!
-					for (int index = 0; index < offsets.length; ++index) {
-						final IntervalView<FloatType> slice = Views.hyperSlice(affs, affs.numDimensions() - 1, index);
-						for (int d = 0; d < offsets[index].length; ++d) {
-							final long offset = offsets[index][d];
-							if (offset == 0)
-								continue;
-							final long pos = offset > 0 ? slice.max(d) + 1 - offset : slice.min(d) - 1 - offset;
-							Views.hyperSlice(slice, d, pos).forEach(p -> p.setReal(Float.NaN));
-						}
-					}
+					invalidateOutOfBlockAffinities(affs._1(), new FloatType(Float.NaN), offsets);
+					invalidateOutOfBlockAffinities(affs._2(), new FloatType(Float.NaN), offsets);
 					return affs;
 				})
 				.mapToPair(t -> {
 					final Interval block = t._1();
-					final RandomAccessibleInterval<FloatType> uncollapsedAffinities = t._2();
+					final RandomAccessibleInterval<FloatType> uncollapsedAffinities = t._2()._1();
+					final RandomAccessibleInterval<FloatType> uncollapsedSmoothedAffinities = t._2()._2();
 
 					final CellGrid grid = new CellGrid(outputDims, blockSize);
 					final CellGrid watershedsGrid = new CellGrid(outputDims, watershedBlockSize);
@@ -410,6 +394,14 @@ public class SparkRain {
 							new ArrayImgFactory<>(new FloatType()),
 							symmetricOrder
 					);
+
+					final RandomAccessibleInterval<FloatType> symmetricSmoothedAffinities = uncollapsedSmoothedAffinities == null
+							? symmetricAffinities
+							: Watersheds.constructAffinities(
+									uncollapsedSmoothedAffinities,
+									offsets,
+									new ArrayImgFactory<>(new FloatType()),
+									symmetricOrder);
 
 //					final long[][] symmetricOffsets = new long[offsets.length * 2][];
 //					for (int index = 0; index < offsets.length; ++index) {
@@ -512,7 +504,7 @@ public class SparkRain {
 
 					LOG.debug("Starting seeded watersheds with offsets {}", (Object) symmetricOffsets);
 					Watersheds.seededFromAffinities(
-							Views.collapseReal(symmetricAffinities),
+							Views.collapseReal(symmetricSmoothedAffinities),
 							labels,
 							seeds,
 							symmetricOffsets,
@@ -724,6 +716,39 @@ public class SparkRain {
 			copy[i] = array[k];
 		}
 		return copy;
+	}
+
+	private static <T extends RealType<T>> ArrayImg<FloatType, FloatArray> smooth(
+			final RandomAccessibleInterval<T> source,
+			final Interval interval,
+			final int channelDim,
+			double sigma) {
+		final ArrayImg<FloatType, FloatArray> img = ArrayImgs.floats(Intervals.dimensionsAsLongArray(interval));
+
+		for (long channel = interval.min(channelDim); channel <= interval.max(channelDim); ++channel) {
+			Gauss3.gauss(
+					sigma,
+					Views.extendBorder(Views.hyperSlice(source, channelDim, channel)),
+					Views.hyperSlice(Views.translate(img, Intervals.minAsLongArray(interval)), channelDim, channel));
+		}
+		return img;
+	}
+
+	private static <T extends RealType<T>> void invalidateOutOfBlockAffinities(
+			final RandomAccessibleInterval<T> affs,
+			final T invalid,
+			final long[]... offsets
+	) {
+		for (int index = 0; index < offsets.length; ++index) {
+			final IntervalView<T> slice = Views.hyperSlice(affs, affs.numDimensions() - 1, index);
+			for (int d = 0; d < offsets[index].length; ++d) {
+				final long offset = offsets[index][d];
+				if (offset == 0)
+					continue;
+				final long pos = offset > 0 ? slice.max(d) + 1 - offset : slice.min(d) - 1 - offset;
+				Views.hyperSlice(slice, d, pos).forEach(p -> p.set(invalid));
+			}
+		}
 	}
 
 }
