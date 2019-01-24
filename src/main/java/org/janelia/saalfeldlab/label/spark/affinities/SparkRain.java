@@ -37,6 +37,7 @@ import net.imglib2.util.Util;
 import net.imglib2.view.IntervalView;
 import net.imglib2.view.MixedTransformView;
 import net.imglib2.view.Views;
+import org.apache.commons.lang.builder.ToStringBuilder;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.label.spark.Version;
@@ -66,6 +67,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.LongUnaryOperator;
@@ -91,12 +93,16 @@ public class SparkRain {
 
 	private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-	private static class Offset {
+	private static class Offset implements Serializable {
+
+		@Expose
+		private final int channelIndex;
 
 		@Expose
 		private final long[] offset;
 
-		public Offset(final long... offset) {
+		public Offset(final int channelIndex, final long... offset) {
+			this.channelIndex = channelIndex;
 			this.offset = offset;
 		}
 
@@ -104,13 +110,35 @@ public class SparkRain {
 			return offset.clone();
 		}
 
+		public int channelIndex() {
+			return channelIndex;
+		}
+
 		@Override
 		public String toString() {
-			return super.toString();
+			return new ToStringBuilder(this)
+					.append("channelIndex", channelIndex)
+					.append("offset", Arrays.toString(offset))
+					.toString();
+		}
+
+		public static Offset parseOffset(final String representation) {
+			final String[] split = representation.split(":");
+			return new Offset(
+					split.length > 1 ? Integer.parseInt(split[1]) : -1,
+					Stream.of(split[0].split(",")).mapToLong(Long::parseLong).toArray());
+		}
+
+		public static class Converter implements CommandLine.ITypeConverter<Offset> {
+
+			@Override
+			public Offset convert(String s) {
+				return Offset.parseOffset(s);
+			}
 		}
 	}
 
-	private static class Args implements Serializable {
+	private static class Args implements Serializable, Callable<Void> {
 
 		@Expose
 		@CommandLine.Parameters(arity = "1", paramLabel = "INPUT_CONTAINER", description = "Path to N5 container with affinities dataset.")
@@ -153,7 +181,7 @@ public class SparkRain {
 		Double threshold = 0.9;
 
 		@Expose
-		@CommandLine.Option(names = "--offsets", arity = "1..*", paramLabel = "OFFSETS", description = "Structuring elements for affinities. Defaults to -1,0,0 0,-1,0 0,0,-1.")
+		@CommandLine.Option(names = "--offsets", arity = "1..*", paramLabel = "OFFSETS", description = "Structuring elements for affinities. Defaults to -1,0,0 0,-1,0 0,0,-1.", converter = Offset.Converter.class)
 		Offset[] offsets = {new Offset(-1, 0, 0), new Offset(0, -1, 0), new Offset(0, 0, -1)};
 
 		@Expose
@@ -205,6 +233,31 @@ public class SparkRain {
 		@CommandLine.Option(names = { "-h", "--help"}, usageHelp = true, description = "Display this help and exit")
 		private Boolean help;
 
+		@Override
+		public Void call() throws Exception {
+
+			final long numSpecifiedOffsetChannelIndices = Stream.of(offsets).filter(o -> o.channelIndex >= 0).count();
+
+			if (numSpecifiedOffsetChannelIndices == 0) {
+				final DatasetAttributes attributes = new N5FSWriter(inputContainer).getDatasetAttributes(affinities);
+				if (attributes.getDimensions()[attributes.getNumDimensions() - 1] != this.offsets.length)
+					throw new Exception("Need to define all offsets when not specifying channel indices explicitly.");
+			} else if (numSpecifiedOffsetChannelIndices < offsets.length - 1)
+				throw new Exception("Can only specify all or no channel indices for offsets.");
+
+			return null;
+		}
+
+		public Offset[] enumeratedOffsets() {
+			final Offset[] enumeratedOffsets = new Offset[this.offsets.length];
+			for (int i = 0; i < offsets.length; ++i) {
+				final Offset o = this.offsets[i];
+				enumeratedOffsets[i] = new Offset(
+						o.channelIndex == -1 ? i : o.channelIndex,
+						o.offset.clone());
+			}
+			return enumeratedOffsets;
+		}
 	}
 
 	public static void main(final String[] argv) throws IOException {
@@ -216,13 +269,7 @@ public class SparkRain {
 	public static void run(final String... argv) throws IOException {
 
 		final Args args = new Args();
-		final CommandLine cmdLine = new CommandLine(args)
-				.registerConverter(Offset.class, it -> new Offset(Stream.of(it.split(",")).mapToLong(Long::parseLong).toArray()));
-		cmdLine.parse(argv);
-		if (cmdLine.isUsageHelpRequested()) {
-			cmdLine.usage(System.err);
-			System.exit(0);
-		}
+		CommandLine.call(args, argv);
 
 		final N5WriterSupplier n5in = new N5WriterSupplier(args.inputContainer, args.prettyPrint, args.disbaleHtmlEscape);
 
@@ -235,13 +282,7 @@ public class SparkRain {
 		final long[] outputDims = new long[inputDims.length - 1];
 		Arrays.setAll(outputDims, d -> inputDims[d]);
 
-		if (inputDims[inputDims.length - 1] != args.offsets.length)
-			throw new RuntimeException(String.format(
-					"Offsets and input dimensions inconsistent: %s -- %s",
-					Arrays.toString(args.offsets),
-					Arrays.toString(inputDims)));
-
-		final Map<String, Object> labelUtilitiesSparkAttributes = new HashMap<String, Object>();
+		final Map<String, Object> labelUtilitiesSparkAttributes = new HashMap<>();
 		labelUtilitiesSparkAttributes.put(ARGUMENTS_KEY, args);
 		labelUtilitiesSparkAttributes.put(ARGV_KEY, argv);
 		labelUtilitiesSparkAttributes.put(VERSION_KEY, Version.VERSION_STRING);
@@ -284,6 +325,8 @@ public class SparkRain {
 				datasets.entrySet().stream().collect(Collectors.toMap(entry -> hasHalo ? String.format(args.croppedDatasetPattern, entry.getKey()) : entry.getKey(), Map.Entry::getValue)),
 				attributes);
 
+		final Offset[] offsets = args.enumeratedOffsets();
+
 
 		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
 		try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
@@ -297,7 +340,8 @@ public class SparkRain {
 					args.minWatershedAffinity,
 					args.threshold,
 					args.minSize,
-					Stream.of(args.offsets).map(Offset::offset).toArray(long[][]::new),
+					Stream.of(offsets).map(Offset::offset).toArray(long[][]::new),
+					Stream.of(offsets).mapToInt(Offset::channelIndex).toArray(),
 					args.smoothAffinitiesSigma,
 					args.affinities,
 					args.smoothedAffinities,
@@ -325,6 +369,7 @@ public class SparkRain {
 			final double threshold,
 			final int minSize,
 			final long[][] offsets,
+			final int[] offsetChannelIndices,
 			final double smoothAffinitiesSigma,
 			final String affinities,
 			final String smoothedAffinities,
@@ -355,6 +400,7 @@ public class SparkRain {
 				.map(t -> new FinalInterval(t._1(), t._2()))
 				.mapToPair(block -> new Tuple2<>(block, N5Utils.<FloatType>open(n5in.get(), affinities)))
 				.mapValues(affs -> invertAffinitiesAxis ? Views.zeroMin(Views.invertAxis(affs, affs.numDimensions() - 1)) : affs)
+				.mapValues(affs -> Views.stack(IntStream.of(offsetChannelIndices).mapToObj(idx -> Views.hyperSlice(affs, affs.numDimensions() - 1, (long) idx)).collect(Collectors.toList())))
 				.mapToPair(t -> {
 					final Interval withHalo = Intervals.expand(t._1(), halo);
 					final Interval withHaloAndChannels = addDimension(withHalo, 0, offsets.length - 1);
@@ -402,13 +448,6 @@ public class SparkRain {
 									offsets,
 									new ArrayImgFactory<>(new FloatType()),
 									symmetricOrder);
-
-//					final long[][] symmetricOffsets = new long[offsets.length * 2][];
-//					for (int index = 0; index < offsets.length; ++index) {
-//						symmetricOffsets[index] = offsets[index].clone();
-//						symmetricOffsets[index + offsets.length] = offsets[offsets.length - 1 - index].clone();
-//						for (int d = 0; d < symmetricOffsets[index + offsets.length].length; ++d)
-//							symmetricOffsets[index + offsets.length][d] *= -1;
 //					}
 					final long[][] symmetricOffsets = Watersheds.symmetricOffsets(Watersheds.SymmetricOffsetOrder.ABCCBA, offsets);
 
