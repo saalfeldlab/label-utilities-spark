@@ -12,6 +12,7 @@ import net.imglib2.converter.RealDoubleConverter;
 import net.imglib2.converter.RealFloatConverter;
 import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgs;
+import net.imglib2.loops.LoopBuilder;
 import net.imglib2.type.numeric.real.DoubleType;
 import net.imglib2.type.numeric.real.FloatType;
 import net.imglib2.util.Intervals;
@@ -167,6 +168,9 @@ public class AverageAffinities {
 				.map(i -> new Tuple2<>(Intervals.minAsLongArray(i), Intervals.maxAsLongArray(i)))
 				.collect(Collectors.toList());
 
+		LOG.info("Parallelizing over blocks {}", blocks);
+
+
 		sc
 				.parallelize(blocks)
 				.mapToPair(block -> new Tuple2<>(block, (RandomAccessibleInterval<FloatType>) N5Utils.open(n5OutSupplier.get(), affinities)))
@@ -177,22 +181,18 @@ public class AverageAffinities {
 					final RandomAccessibleInterval<DoubleType> slice1 = Views.translate(averagedAffinities, min);
 					for (final Offset offset : enumeratedOffsets) {
 						final RandomAccessible<FloatType> affs = Views.extendZero(Views.hyperSlice(p._2(), min.length, (long) offset.channelIndex()));
+						final IntervalView<DoubleType> expanded1 = Views.expandZero(slice1, abs(offset.offset()));
 						final IntervalView<DoubleType> slice2 = Views.interval(Views.extendZero(slice1), translate(slice1, offset.offset()));
+						final IntervalView<DoubleType> expanded2 = Views.expandZero(slice2, abs(offset.offset()));
 
-						final Cursor<DoubleType> c1 = Views.flatIterable(slice1).cursor();
-						final Cursor<DoubleType> c2 = Views.flatIterable(slice2).cursor();
-						final Cursor<DoubleType> a  = Views.flatIterable(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), slice1)).cursor();
-
-						while(a.hasNext()) {
-							final DoubleType val = a.next();
-							c1.fwd();
-							c2.fwd();
-							if (Double.isFinite(val.getRealDouble())) {
-//								LOG.warn("Adding {} to {} and {}", val, c1.get(), c2.get());
-								c1.get().add(val);
-								c2.get().add(val);
-							}
-						}
+						LoopBuilder
+								.setImages(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1), expanded1, expanded2)
+								.forEachPixel((a, s1, s2) -> {
+									if (Double.isFinite(a.getRealDouble())) {
+										s1.add(a);
+										s2.add(a);
+									}
+								});
 					}
 
 					final double factor = 0.5 / enumeratedOffsets.length;
@@ -226,6 +226,12 @@ public class AverageAffinities {
 		for (int d = 0; d < translation.length; ++d)
 			interval = Intervals.translate(interval, translation[d], d);
 		return interval;
+	}
+
+	private static long[] abs(long... array) {
+		final long[] abs = new long[array.length];
+		Arrays.setAll(abs, d -> Math.abs(array[d]));
+		return abs;
 	}
 
 }
