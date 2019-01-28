@@ -567,7 +567,7 @@ public class SparkRain {
 		}
 
 		if (relabel) {
-			sc
+			final long numBlocks = sc
 					.parallelizePairs(idOffsets)
 					.map(t -> {
 						final N5Writer n5 = n5out.get();
@@ -586,6 +586,7 @@ public class SparkRain {
 						return true;
 					})
 					.count();
+			System.out.println("Relabeled " + numBlocks + " blocks");
 			final long maxId = startIndex;
 			final N5Writer n5 = n5out.get();
 			n5.setAttribute(hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds, "maxId", maxId);
@@ -620,8 +621,9 @@ public class SparkRain {
 		final CellGrid grid = new CellGrid(attributes.getDimensions(), attributes.getBlockSize());
 		final RandomAccessibleInterval<T> data = Views.interval(N5Utils.<T>open(n5, dataset), interval);
 		final RandomAccessibleInterval<T> copy = new ArrayImgFactory<>(Util.getTypeFromInterval(data).createVariable()).create(data);
-		for (net.imglib2.util.Pair<T, T> p : Views.interval(Views.pair(data, copy), data))
+		for (net.imglib2.util.Pair<T, T> p : Views.interval(Views.pair(Views.zeroMin(data), copy), Views.zeroMin(data)))
 			idMapping.accept(p.getA(), p.getB());
+		// LoopBuilder class loader issues in spark
 //		LoopBuilder.setImages(data, copy).forEachPixel(idMapping);
 		final long[] blockPos = Intervals.minAsLongArray(interval);
 		grid.getCellPosition(blockPos, blockPos);
