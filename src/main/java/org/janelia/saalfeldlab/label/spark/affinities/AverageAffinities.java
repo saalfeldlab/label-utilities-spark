@@ -1,7 +1,6 @@
 package org.janelia.saalfeldlab.label.spark.affinities;
 
 import com.google.gson.annotations.Expose;
-import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
 import net.imglib2.RandomAccessible;
@@ -10,21 +9,18 @@ import net.imglib2.algorithm.util.Grids;
 import net.imglib2.converter.Converters;
 import net.imglib2.converter.RealDoubleConverter;
 import net.imglib2.converter.RealFloatConverter;
-import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgs;
 import net.imglib2.loops.LoopBuilder;
 import net.imglib2.type.numeric.real.DoubleType;
 import net.imglib2.type.numeric.real.FloatType;
 import net.imglib2.util.Intervals;
 import net.imglib2.view.IntervalView;
-import net.imglib2.view.MixedTransformView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
-import org.janelia.saalfeldlab.n5.N5FSReader;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
@@ -71,8 +67,8 @@ public class AverageAffinities {
 		Offset[] offsets = {new Offset(-1, 0, 0), new Offset(0, -1, 0), new Offset(0, 0, -1)};
 
 		@Expose
-		@CommandLine.Option(names = "--block-size", paramLabel = "BLOCK_SIZE", description = "Block size of output.", split = ",")
-		int[] blockSize = {64, 64, 64};
+		@CommandLine.Option(names = "--block-size", paramLabel = "BLOCK_SIZE", description = "Block size of output. Defaults to input block size w/o channel dim if not specified.", split = ",")
+		int[] blockSize = null;
 
 		@Expose
 		@CommandLine.Option(names = "--blocks-per-task", paramLabel = "BLOCKS_PER_TASK", description = "How many blocks to combine for watersheds/connected components (one value per dimension)", split=",")
@@ -88,9 +84,9 @@ public class AverageAffinities {
 		public Void call() throws Exception {
 
 			final long numSpecifiedOffsetChannelIndices = Stream.of(offsets).filter(o -> o.channelIndex() >= 0).count();
+			final DatasetAttributes attributes = new N5FSWriter(inputContainer).getDatasetAttributes(affinities);
 
 			if (numSpecifiedOffsetChannelIndices == 0) {
-				final DatasetAttributes attributes = new N5FSWriter(inputContainer).getDatasetAttributes(affinities);
 				if (attributes.getDimensions()[attributes.getNumDimensions() - 1] != this.offsets.length)
 					throw new Exception("Need to define all offsets when not specifying channel indices explicitly.");
 			} else if (numSpecifiedOffsetChannelIndices < offsets.length - 1)
@@ -104,6 +100,9 @@ public class AverageAffinities {
 
 			if (outputContainer == null)
 				outputContainer = inputContainer;
+
+			if (blockSize == null)
+				blockSize = subArray(attributes.getBlockSize(), 0, attributes.getNumDimensions() - 1);
 
 			return null;
 		}
@@ -181,9 +180,16 @@ public class AverageAffinities {
 					final RandomAccessibleInterval<DoubleType> slice1 = Views.translate(averagedAffinities, min);
 					for (final Offset offset : enumeratedOffsets) {
 						final RandomAccessible<FloatType> affs = Views.extendZero(Views.hyperSlice(p._2(), min.length, (long) offset.channelIndex()));
-						final IntervalView<DoubleType> expanded1 = Views.expandZero(slice1, abs(offset.offset()));
-						final IntervalView<DoubleType> slice2 = Views.interval(Views.extendZero(slice1), translate(slice1, offset.offset()));
-						final IntervalView<DoubleType> expanded2 = Views.expandZero(slice2, abs(offset.offset()));
+						final IntervalView<DoubleType> expanded1 = Views.interval(Views.extendZero(slice1), expandAsNeeded(slice1, offset.offset()));
+						final IntervalView<DoubleType> expanded2 = Views.translate(expanded1, offset.offset());
+
+						LOG.info(
+								"Averaging {} voxels for offset {} : [{}:{}] ({})",
+								Intervals.numElements(expanded1),
+								offset,
+								Intervals.minAsLongArray(expanded1),
+								Intervals.minAsLongArray(expanded1),
+								Intervals.dimensionsAsLongArray(expanded1));
 
 						LoopBuilder
 								.setImages(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1), expanded1, expanded2)
@@ -232,6 +238,31 @@ public class AverageAffinities {
 		final long[] abs = new long[array.length];
 		Arrays.setAll(abs, d -> Math.abs(array[d]));
 		return abs;
+	}
+
+	private static Interval expandAsNeeded(
+			final Interval source,
+			final long[] offsets
+	) {
+		final long[] min = Intervals.minAsLongArray(source);
+		final long[] max = Intervals.maxAsLongArray(source);
+
+		for (int d = 0; d < offsets.length; ++d) {
+			final long offset = offsets[d];
+			if (offset < 0)
+				max[d] -= offset;
+			else if (offset > 0)
+				min[d] -= offset;
+		}
+
+		return new FinalInterval(min, max);
+
+	}
+
+	private static int[] subArray(final int[] array, int start, int stop) {
+		final int[] result = new int[stop - start];
+		Arrays.setAll(result, d -> array[d] + start);
+		return result;
 	}
 
 }
