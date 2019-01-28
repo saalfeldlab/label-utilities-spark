@@ -246,6 +246,9 @@ public class SparkRain {
 			} else if (numSpecifiedOffsetChannelIndices < offsets.length - 1)
 				throw new Exception("Can only specify all or no channel indices for offsets.");
 
+			if (smoothAffinitiesSigma > 0.0)
+				throw new Exception("Cannot smooth images in spark enviornment currently. See also imglib/imglib2-algorithm#79");
+
 			return null;
 		}
 
