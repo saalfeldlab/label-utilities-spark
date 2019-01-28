@@ -6,10 +6,11 @@ import gnu.trove.map.hash.TIntIntHashMap;
 import gnu.trove.set.TIntSet;
 import gnu.trove.set.hash.TIntHashSet;
 import kotlin.Pair;
+import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
+import net.imglib2.IterableInterval;
 import net.imglib2.Point;
-import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.gauss3.Gauss3;
 import net.imglib2.algorithm.labeling.affinities.ConnectedComponents;
@@ -17,13 +18,13 @@ import net.imglib2.algorithm.labeling.affinities.Watersheds;
 import net.imglib2.algorithm.util.Grids;
 import net.imglib2.algorithm.util.unionfind.IntArrayUnionFind;
 import net.imglib2.converter.Converters;
+import net.imglib2.img.ImgFactory;
 import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgFactory;
 import net.imglib2.img.array.ArrayImgs;
 import net.imglib2.img.basictypeaccess.array.FloatArray;
 import net.imglib2.img.basictypeaccess.array.LongArray;
 import net.imglib2.img.cell.CellGrid;
-import net.imglib2.loops.LoopBuilder;
 import net.imglib2.type.NativeType;
 import net.imglib2.type.label.Label;
 import net.imglib2.type.logic.BitType;
@@ -35,11 +36,11 @@ import net.imglib2.type.numeric.real.FloatType;
 import net.imglib2.util.Intervals;
 import net.imglib2.util.Util;
 import net.imglib2.view.IntervalView;
-import net.imglib2.view.MixedTransformView;
 import net.imglib2.view.Views;
 import org.apache.commons.lang.builder.ToStringBuilder;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.api.java.function.PairFunction;
 import org.janelia.saalfeldlab.label.spark.Version;
 import org.janelia.saalfeldlab.n5.DataBlock;
 import org.janelia.saalfeldlab.n5.DataType;
@@ -47,6 +48,7 @@ import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
+import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
@@ -74,7 +76,6 @@ import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 public class SparkRain {
@@ -359,8 +360,8 @@ public class SparkRain {
 
 	public static void run(
 			final JavaSparkContext sc,
-			final N5WriterSupplier n5in,
-			final N5WriterSupplier n5out,
+			final Supplier<? extends N5Reader> n5in,
+			final Supplier<? extends N5Writer> n5out,
 			final long[] outputDims,
 			final long[] halo,
 			final boolean invertAffinitiesAxis,
@@ -395,24 +396,14 @@ public class SparkRain {
 
 		final List<Tuple2<Tuple2<long[], long[]>, Integer>> idCounts = sc
 				.parallelize(watershedBlocks)
-				.map(t -> new FinalInterval(t._1(), t._2()))
-				.mapToPair(block -> new Tuple2<>(block, N5Utils.<FloatType>open(n5in.get(), affinities)))
-				.mapValues(affs -> invertAffinitiesAxis ? Views.zeroMin(Views.invertAxis(affs, affs.numDimensions() - 1)) : affs)
-				.mapValues(affs -> Views.stack(IntStream.of(offsetChannelIndices).mapToObj(idx -> Views.hyperSlice(affs, affs.numDimensions() - 1, (long) idx)).collect(Collectors.toList())))
-				.mapToPair(t -> {
-					final Interval withHalo = Intervals.expand(t._1(), halo);
-					final Interval withHaloAndChannels = addDimension(withHalo, 0, offsets.length - 1);
-					final ArrayImg<FloatType, FloatArray> affinityCrop = ArrayImgs.floats(Intervals.dimensionsAsLongArray(withHaloAndChannels));
-					LoopBuilder.setImages(affinityCrop, Views.interval(Views.extendValue(t._2(), new FloatType(Float.NaN)), withHaloAndChannels)).forEachPixel(FloatType::set);
-					return smoothAffinitiesSigma > 0.0
-						? new Tuple2<>(t._1(), new Tuple2<>(affinityCrop, smooth(t._2(), withHaloAndChannels, withHaloAndChannels.numDimensions() - 1, smoothAffinitiesSigma)))
-						: new Tuple2<>(t._1(), new Tuple2<>(affinityCrop, (ArrayImg<FloatType, FloatArray>) null));
-				})
+				.map(t -> (Interval) new FinalInterval(t._1(), t._2()))
+				.mapToPair(new CropAffinities(n5in, affinities, invertAffinitiesAxis, halo, smoothAffinitiesSigma))
 				.mapValues(affs -> {
 					// TODO how to avoid looking outside interval?
 					// TODO optimize this!
 					invalidateOutOfBlockAffinities(affs._1(), new FloatType(Float.NaN), offsets);
-					invalidateOutOfBlockAffinities(affs._2(), new FloatType(Float.NaN), offsets);
+					if (affs._2() != null)
+						invalidateOutOfBlockAffinities(affs._2(), new FloatType(Float.NaN), offsets);
 					return affs;
 				})
 				.mapToPair(t -> {
@@ -432,12 +423,18 @@ public class SparkRain {
 
 					final int[] symmetricOrder = new int[offsets.length];
 					Arrays.setAll(symmetricOrder, d -> offsets.length - 1 - d);
-					final RandomAccessibleInterval<FloatType> symmetricAffinities = Watersheds.constructAffinities(
+					// LoopBuilder issues in this call!
+//					final RandomAccessibleInterval<FloatType> symmetricAffinities = Watersheds.constructAffinities(
+//							uncollapsedAffinities,
+//							offsets,
+//							new ArrayImgFactory<>(new FloatType()),
+//							symmetricOrder
+//					);
+					final RandomAccessibleInterval<FloatType> symmetricAffinities = constructAffinitiesWithCopy(
 							uncollapsedAffinities,
-							offsets,
 							new ArrayImgFactory<>(new FloatType()),
-							symmetricOrder
-					);
+							offsets,
+							symmetricOrder);
 
 					final RandomAccessibleInterval<FloatType> symmetricSmoothedAffinities = uncollapsedSmoothedAffinities == null
 							? symmetricAffinities
@@ -620,7 +617,9 @@ public class SparkRain {
 		final CellGrid grid = new CellGrid(attributes.getDimensions(), attributes.getBlockSize());
 		final RandomAccessibleInterval<T> data = Views.interval(N5Utils.<T>open(n5, dataset), interval);
 		final RandomAccessibleInterval<T> copy = new ArrayImgFactory<>(Util.getTypeFromInterval(data).createVariable()).create(data);
-		LoopBuilder.setImages(data, copy).forEachPixel(idMapping);
+		for (net.imglib2.util.Pair<T, T> p : Views.interval(Views.pair(data, copy), data))
+			idMapping.accept(p.getA(), p.getB());
+//		LoopBuilder.setImages(data, copy).forEachPixel(idMapping);
 		final long[] blockPos = Intervals.minAsLongArray(interval);
 		grid.getCellPosition(blockPos, blockPos);
 		N5Utils.saveBlock(copy, n5, dataset, attributes, blockPos);
@@ -786,6 +785,93 @@ public class SparkRain {
 				Views.hyperSlice(slice, d, pos).forEach(p -> p.set(invalid));
 			}
 		}
+	}
+
+	private static class CropAffinities implements PairFunction<Interval, Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<FloatType>>> {
+
+		private final Supplier<? extends N5Reader> n5in;
+
+		private final String affinities;
+
+		private final boolean invertAffinitiesAxis;
+
+		private final long[] halo;
+
+		private final double smoothAffinitiesSigma;
+
+		private CropAffinities(
+				final Supplier<? extends N5Reader> n5in,
+				final String affinities,
+				final boolean invertAffinitiesAxis,
+				final long[] halo,
+				final double smoothAffinitiesSigma) {
+			this.n5in = n5in;
+			this.affinities = affinities;
+			this.invertAffinitiesAxis = invertAffinitiesAxis;
+			this.halo = halo;
+			this.smoothAffinitiesSigma = smoothAffinitiesSigma;
+		}
+
+		@Override
+		public Tuple2<Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<FloatType>>> call(final Interval interval) throws Exception {
+			RandomAccessibleInterval<FloatType> affs = N5Utils.open(n5in.get(), affinities);
+			affs = invertAffinitiesAxis ? Views.zeroMin(Views.invertAxis(affs, affs.numDimensions() - 1)) : affs;
+
+			final Interval withHalo = Intervals.expand(interval, halo);
+			final Interval withHaloAndChannels = addDimension(withHalo, 0, withHalo.numDimensions() - 1);
+
+			final ArrayImg<FloatType, FloatArray> affinityCrop = ArrayImgs.floats(Intervals.dimensionsAsLongArray(withHaloAndChannels));
+			final Cursor<FloatType> source = Views.flatIterable(Views.interval(Views.extendValue(affs, new FloatType(Float.NaN)), withHaloAndChannels)).cursor();
+			final Cursor<FloatType> target = Views.flatIterable(affinityCrop).cursor();
+			while (target.hasNext())
+				target.next().set(source.next());
+			// Class loader issues with loop builder on spark (non-local)
+//			LoopBuilder.setImages(affinityCrop, Views.interval(Views.extendValue(affs, new FloatType(Float.NaN)), withHaloAndChannels)).forEachPixel(FloatType::set);
+			return smoothAffinitiesSigma > 0.0
+					? new Tuple2<>(interval, new Tuple2<>(affinityCrop, smooth(affs, withHaloAndChannels, withHaloAndChannels.numDimensions() - 1, smoothAffinitiesSigma)))
+					: new Tuple2<>(interval, new Tuple2<>(affinityCrop, (ArrayImg<FloatType, FloatArray>) null));
+		}
+	}
+
+	private static <A extends RealType<A>> RandomAccessibleInterval<A> constructAffinitiesWithCopy(
+			final RandomAccessibleInterval<A> affinities,
+			final ImgFactory<A> factory,
+			final long[][] offsets,
+			final int[] order) {
+
+		final long[] dims = Intervals.dimensionsAsLongArray(affinities);
+		dims[dims.length - 1] *= 2;
+		final RandomAccessibleInterval<A> symmetricAffinities = factory.create(dims);
+		{
+			final Cursor<A> source = Views.flatIterable(affinities).cursor();
+			final Cursor<A> target = Views.flatIterable(Views.interval(symmetricAffinities, Views.zeroMin(affinities))).cursor();
+			while (source.hasNext())
+				target.next().set(source.next());
+		}
+
+		final A nanExtension = Util.getTypeFromInterval(affinities).createVariable();
+		nanExtension.setReal(Double.NaN);
+
+		final IntervalView<A> zeroMinAffinities = Views.zeroMin(affinities);
+
+		for (int offsetIndex = 0; offsetIndex < offsets.length; ++offsetIndex) {
+			final int targetIndex = offsets.length + order[offsetIndex];
+			final IntervalView<A> targetSlice = Views.hyperSlice(symmetricAffinities, dims.length - 1, (long) targetIndex);
+			final IntervalView<A> sourceSlice = Views.interval(Views.translate(
+					Views.extendValue(Views.hyperSlice(
+							zeroMinAffinities,
+							dims.length - 1,
+							(long) offsetIndex), nanExtension),
+					offsets[offsetIndex]), targetSlice);
+
+			Cursor<A> source = Views.flatIterable(sourceSlice).cursor();
+			Cursor<A> target = Views.flatIterable(targetSlice).cursor();
+			while (source.hasNext())
+				target.next().set(source.next());
+		}
+
+		return Views.translate(symmetricAffinities, Intervals.minAsLongArray(affinities));
+
 	}
 
 }
