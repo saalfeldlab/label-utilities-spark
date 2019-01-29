@@ -2,25 +2,28 @@ package org.janelia.saalfeldlab.label.spark;
 
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.Expose;
+import gnu.trove.iterator.TLongIntIterator;
+import gnu.trove.map.TLongIntMap;
+import gnu.trove.map.TLongLongMap;
+import gnu.trove.map.TLongObjectMap;
 import gnu.trove.map.hash.TLongIntHashMap;
 import gnu.trove.map.hash.TLongLongHashMap;
+import gnu.trove.map.hash.TLongObjectHashMap;
 import gnu.trove.set.TLongSet;
 import gnu.trove.set.hash.TLongHashSet;
 import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
-import net.imglib2.IterableInterval;
 import net.imglib2.Point;
-import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.gauss3.Gauss3;
-import net.imglib2.algorithm.labeling.ConnectedComponentAnalysis;
 import net.imglib2.algorithm.labeling.Watersheds;
 import net.imglib2.algorithm.localextrema.LocalExtrema;
 import net.imglib2.algorithm.neighborhood.DiamondShape;
 import net.imglib2.algorithm.util.Grids;
 import net.imglib2.algorithm.util.unionfind.IntArrayUnionFind;
-import net.imglib2.converter.Converters;
+import net.imglib2.algorithm.util.unionfind.LongHashMapUnionFind;
+import net.imglib2.algorithm.util.unionfind.UnionFind;
 import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgFactory;
 import net.imglib2.img.array.ArrayImgs;
@@ -29,7 +32,6 @@ import net.imglib2.img.basictypeaccess.array.FloatArray;
 import net.imglib2.img.basictypeaccess.array.LongArray;
 import net.imglib2.img.cell.CellGrid;
 import net.imglib2.type.NativeType;
-import net.imglib2.type.logic.BitType;
 import net.imglib2.type.numeric.IntegerType;
 import net.imglib2.type.numeric.RealType;
 import net.imglib2.type.numeric.integer.UnsignedLongType;
@@ -67,9 +69,11 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
@@ -117,6 +121,10 @@ public class SparkWatersheds {
 		@Expose
 		@CommandLine.Option(names = "--merged-dataset", paramLabel = "WATERSHEDS_MERGED", description = "Path to region merged in OUTPUT_CONTAINER")
 		String merged = "volumes/labels/seeded_watersheds_merged";
+
+		@Expose
+		@CommandLine.Option(names = "--block-merged-dataset", paramLabel = "WATERSHEDS_MERGED", description = "Path to region merged in OUTPUT_CONTAINER")
+		String blockMerged = "volumes/labels/seeded_watersheds_block_merged";
 
 		@Expose
 		@CommandLine.Option(names = "--block-size", paramLabel = "BLOCK_SIZE", description = "Block size of output.", split = ",")
@@ -199,7 +207,7 @@ public class SparkWatersheds {
 		if (hasHalo)
 			throw new UnsupportedOperationException("Halo currently not supported, please omit halo option!");
 
-		String[] uint64Datasets = {args.merged, args.seededWatersheds, args.watershedSeeds};
+		String[] uint64Datasets = {args.merged, args.seededWatersheds, args.watershedSeeds, args.blockMerged};
 		String[] uint8Datasets = {};
 
 		final double[] resolution = reverted(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)), args.revertArrayAttributes);
@@ -225,6 +233,9 @@ public class SparkWatersheds {
 
 		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
 		try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
+
+			LOG.info("Input  dims:   {}", inputDims);
+			LOG.info("Output dims:   {}", outputDims);
 			run(
 					sc,
 					n5in,
@@ -235,6 +246,7 @@ public class SparkWatersheds {
 					IntStream.of(args.halo).mapToLong(i -> i).toArray(),
 					args.averagedAffinities,
 					args.merged,
+					args.blockMerged,
 					args.watershedSeeds,
 					args.seededWatersheds,
 					args.croppedDatasetPattern,
@@ -255,6 +267,7 @@ public class SparkWatersheds {
 			final long[] halo,
 			final String averagedAffinities,
 			final String merged,
+			final String blockMerged,
 			final String watershedSeeds,
 			final String seededWatersheds,
 			final String croppedDatasetPattern,
@@ -280,10 +293,11 @@ public class SparkWatersheds {
 				.mapToPair(t -> {
 					final Interval block = t._1();
 					final RandomAccessibleInterval<FloatType> relief = t._2();
-					List<Point> seeds = LocalExtrema.findLocalExtrema(
-							Views.extendValue(relief, new FloatType(Float.MIN_VALUE)),
-							relief,
-							new LocalExtrema.MaximumCheck<>(new FloatType(0.0f)));
+					List<Point> seeds = LocalExtrema
+							.findLocalExtrema(
+									Views.extendValue(relief, new FloatType(Float.MIN_VALUE)),
+									relief,
+									new LocalExtrema.MaximumCheck<>(new FloatType((float)minimumWatershedAffinity)));
 
 					final CellGrid grid = new CellGrid(outputDims, blockSize);
 					final CellGrid watershedsGrid = new CellGrid(outputDims, watershedBlockSize);
@@ -413,11 +427,12 @@ public class SparkWatersheds {
 			final long numBlocks = sc
 					.parallelizePairs(idOffsets)
 					.map(t -> {
+						LOG.debug("Relabeling block ({} {}) starting at id {}", t._1()._1(), t._1()._2(), t._2());
 						final N5Writer n5 = n5out.get();
 						final Interval interval = new FinalInterval(t._1()._1(), t._1()._2());
-						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, t._2());
-						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, merged) : merged, interval, t._2());
-						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, t._2());
+//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, t._2());
+						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, merged) : merged, merged, interval, t._2());
+//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, t._2());
 						if (hasHalo)
 							throw new UnsupportedOperationException("Halo relabeling not implemented yet!");
 
@@ -426,49 +441,112 @@ public class SparkWatersheds {
 						return true;
 					})
 					.count();
-			LOG.info("Relabeled {} blocks", numBlocks);
+			LOG.debug("Relabeled {} blocks", numBlocks);
 			final long maxId = startIndex;
-			final N5Writer n5 = n5out.get();
-			n5.setAttribute(hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, "maxId", maxId);
-			n5.setAttribute(hasHalo ? String.format(croppedDatasetPattern, merged) : merged, "maxId", maxId);
-			n5.setAttribute(hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, "maxId", maxId);
+			LOG.info("Found max id {}", maxId);
+			n5out.get().setAttribute(hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, "maxId", maxId);
+			n5out.get().setAttribute(hasHalo ? String.format(croppedDatasetPattern, merged) : merged, "maxId", maxId);
+			n5out.get().setAttribute(hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, "maxId", maxId);
 
 			if (hasHalo)
 				throw new UnsupportedOperationException("Halo relabeling not implemented yet!");
+
+			if (maxId + 2 > Integer.MAX_VALUE)
+				throw new RuntimeException("Currently only Integer.MAX_VALUE labels supported");
+
+			final IntArrayUnionFind uf = findOverlappingLabelsArgMaxNoHalo(sc, n5out, merged, new IntArrayUnionFind((int) (maxId + 2)), outputDims, blockSize, blocksPerTask, 0);
+
+			final List<Tuple2<Tuple2<long[], long[]>, Tuple2<long[], long[]>>> finalMappings = new ArrayList<>();
+			long maxRoot = 0;
+			for (int index = 0; index < idOffsets.size(); ++index) {
+				final Tuple2<Tuple2<long[], long[]>, Long> idOffset = idOffsets.get(index);
+				final long minLabel = idOffset._2();
+				final long maxLabel = index < idOffsets.size() - 1
+						? idOffsets.get(index + 1)._2()
+						: (maxId + 2);
+
+				LOG.debug("Max label = {} min label = {} for block ({} {})", maxLabel, minLabel, idOffset._1()._1(), idOffset._1()._2());
+				final long[] keys = new long[(int) (maxLabel - minLabel)];
+				final long[] vals = new long[keys.length];
+
+
+				for (int i = 0; i < keys.length; ++i) {
+					final long k = i + minLabel;
+					final long root = uf.findRoot(k);
+					keys[i] = k;
+					vals[i] = root;
+					if (root > maxRoot) {
+						maxRoot = root;
+					}
+				}
+				finalMappings.add(new Tuple2<>(idOffset._1(), new Tuple2<>(keys, vals)));
+			}
+			n5out.get().setAttribute(blockMerged, "maxId", maxRoot);
+
+			sc
+					.parallelize(finalMappings)
+					.foreach(t -> {
+						final Interval interval = new FinalInterval(t._1()._1(), t._1()._2());
+						final TLongLongMap mapping = new TLongLongHashMap(t._2()._1(), t._2()._2());
+
+//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, mapping);
+						relabel(n5out.get(), hasHalo ? String.format(croppedDatasetPattern, merged) : merged, blockMerged, interval, mapping);
+//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, mapping);
+						if (hasHalo)
+							throw new UnsupportedOperationException("Halo relabeling not implemented yet!");
+					});
+
 		}
 
 	}
 
 	private static void relabel(
 			final N5Writer n5,
-			final String dataset,
+			final String source,
+			final String target,
+			final Interval interval,
+			final TLongLongMap mapping) throws IOException {
+		SparkWatersheds.<UnsignedLongType>relabel(n5, source, target, interval, (src, tgt) -> {
+			final long val = mapping.get(src.getIntegerLong());
+			if (val != 0)
+				tgt.set(val);
+		});
+	}
+
+	private static void relabel(
+			final N5Writer n5,
+			final String source,
+			final String target,
 			final Interval interval,
 			final long addIfNotZero) throws IOException {
-		SparkWatersheds.<UnsignedLongType>relabel(n5, dataset, interval, (src, tgt) -> {
-			final long val = src.getIntegerLong();
-			tgt.set(val == 0 ? 0 : val + addIfNotZero);
-		});
+		final CachedMapper mapper = new CachedMapper(addIfNotZero);
+		SparkWatersheds.<UnsignedLongType>relabel(n5, source, target, interval, (src, tgt) -> tgt.set(mapper.applyAsLong(src.getIntegerLong())));
 	}
 
 	private static <T extends IntegerType<T> & NativeType<T>> void relabel(
 			final N5Writer n5,
-			final String dataset,
+			final String source,
+			final String target,
 			final Interval interval,
 			final BiConsumer<T, T> idMapping) throws IOException {
-		final DatasetAttributes attributes = n5.getDatasetAttributes(dataset);
+		final DatasetAttributes attributes = n5.getDatasetAttributes(source);
 		final CellGrid grid = new CellGrid(attributes.getDimensions(), attributes.getBlockSize());
-		final RandomAccessibleInterval<T> data = Views.interval(N5Utils.<T>open(n5, dataset), interval);
+		final RandomAccessibleInterval<T> data = Views.interval(N5Utils.<T>open(n5, source), interval);
 		final RandomAccessibleInterval<T> copy = new ArrayImgFactory<>(Util.getTypeFromInterval(data).createVariable()).create(data);
 		LOG.debug("Input size {} -- output size {}", Intervals.dimensionsAsLongArray(data), Intervals.dimensionsAsLongArray(copy));
+		long maxId = Long.MIN_VALUE;
 		{
 			final Cursor<T> src = Views.flatIterable(data).cursor();
 			final Cursor<T> tgt = Views.flatIterable(copy).cursor();
-			while (src.hasNext())
+			while (src.hasNext()) {
 				idMapping.accept(src.next(), tgt.next());
+				maxId = Math.max(tgt.get().getIntegerLong(), maxId);
+			}
+			LOG.debug("Remapped to max id {}", maxId);
 		}
 		final long[] blockPos = Intervals.minAsLongArray(interval);
 		grid.getCellPosition(blockPos, blockPos);
-		N5Utils.saveBlock(copy, n5, dataset, attributes, blockPos);
+		N5Utils.saveBlock(copy, n5, target, attributes, blockPos);
 	}
 
 	private static void relabel(
@@ -492,7 +570,6 @@ public class SparkWatersheds {
 		}
 		n5.writeBlock(dataset, attributes, new LongArrayDataBlock(block.getSize(), data, block.getGridPosition()));
 	}
-
 	private static void prepareOutputDatasets(
 			final N5Writer n5,
 			final Map<String, DatasetAttributes> datasets,
@@ -633,6 +710,150 @@ public class SparkWatersheds {
 		}
 	}
 
+	private static <UF extends UnionFind> UF findOverlappingLabelsArgMaxNoHalo(
+			final JavaSparkContext sc,
+			final Supplier<? extends N5Reader> n5,
+			final String labelDataset,
+			final UF uf,
+			final long[] dimensions,
+			final int[] blockSize,
+			final int[] blocksPerTask,
+			final long... ignoreThese) {
+
+		Objects.requireNonNull(sc);
+		Objects.requireNonNull(blockSize);
+		Objects.requireNonNull(blocksPerTask);
+		Objects.requireNonNull(ignoreThese);
+
+		final int[] taskBlockSize = new int[blockSize.length];
+		Arrays.setAll(taskBlockSize, d -> blockSize[d] * blocksPerTask[d]);
+
+		final List<Tuple2<long[], long[]>> doubleSizeBlocks = Grids
+				.collectAllContainedIntervals(dimensions, taskBlockSize)
+				.stream()
+				.map(interval -> SparkWatersheds.toMinMaxTuple(interval, Tuple2::new))
+				.collect(Collectors.toList());
+
+		final List<Tuple2<long[], long[]>> mappings = sc
+				.parallelize(doubleSizeBlocks)
+				.mapToPair(minMax -> {
+					final CellGrid grid = new CellGrid(dimensions, blockSize);
+					final long[] thisBlockMax = minMax._2();
+					final long[] thisBlockMin = new long[thisBlockMax.length];
+					grid.getCellPosition(thisBlockMax, thisBlockMin);
+					Arrays.setAll(thisBlockMin, d -> grid.getCellMin(d, thisBlockMin[d] - 1));
+
+					final RandomAccessibleInterval<UnsignedLongType> labels = N5Utils.open(n5.get(), labelDataset);
+					final RandomAccessibleInterval<UnsignedLongType> thisBlock = Views.interval(labels, thisBlockMin, thisBlockMax);
+
+					final TLongSet ignoreTheseSet = new TLongHashSet(ignoreThese);
+
+					final TLongLongHashMap mapping = new TLongLongHashMap();
+					final UnionFind localUF = new LongHashMapUnionFind(mapping, 0, Long::compare);
+
+					LOG.debug("This block: ({} {})", Intervals.minAsLongArray(thisBlock), Intervals.maxAsLongArray(thisBlock));
+
+					for (int dim = 0; dim < thisBlock.numDimensions(); ++dim) {
+						final long[] thatBlockMin = thisBlockMin.clone();
+						thatBlockMin[dim] = thisBlockMax[dim] + 1;
+						if (thatBlockMin[dim] >= dimensions[dim]) {
+							LOG.debug("That block min {} outside dimensions {}", thatBlockMin, dimensions);
+							continue;
+						}
+						final long[] thatBlockMax = new long[thatBlockMin.length];
+						Arrays.setAll(thatBlockMax, d -> Math.min(thatBlockMin[d] + taskBlockSize[d], dimensions[d]) - 1);
+
+						final RandomAccessibleInterval<UnsignedLongType> thatBlock = Views.interval(labels, thatBlockMin, thatBlockMax);
+
+						LOG.debug("That block: ({} {})", Intervals.minAsLongArray(thatBlock), Intervals.maxAsLongArray(thatBlock));
+
+						LOG.debug("Slicing this block to {} and that block to {} for dim {}", thisBlockMax[dim], thatBlockMin[dim], dim);
+						RandomAccessibleInterval<UnsignedLongType> thisSlice = Views.hyperSlice(thisBlock, dim, thisBlockMax[dim]);
+						RandomAccessibleInterval<UnsignedLongType> thatSlice = Views.hyperSlice(thatBlock, dim, thatBlockMin[dim]);
+						LOG.debug("This slice: ({} {})", Intervals.minAsLongArray(thisSlice), Intervals.maxAsLongArray(thisSlice));
+						LOG.debug("That slice: ({} {})", Intervals.minAsLongArray(thatSlice), Intervals.maxAsLongArray(thatSlice));
+
+						final Cursor<UnsignedLongType> thisCursor = Views.flatIterable(thisSlice).cursor();
+						final Cursor<UnsignedLongType> thatCursor = Views.flatIterable(thatSlice).cursor();
+
+						final TLongObjectMap<TLongIntMap> thisMap = new TLongObjectHashMap<>();
+						final TLongObjectMap<TLongIntMap> thatMap = new TLongObjectHashMap<>();
+
+						while (thisCursor.hasNext()) {
+							final long thisLabel = thisCursor.next().getIntegerLong();
+							final long thatLabel = thatCursor.next().getIntegerLong();
+
+							if (ignoreTheseSet.contains(thisLabel) || ignoreTheseSet.contains(thatLabel))
+								continue;
+
+							if (thisLabel == thatLabel) {
+								LOG.error(
+										"Found same label {} in blocks ({} {}) and ({} {})",
+										thisLabel, Intervals.minAsLongArray(thisBlock),
+										Intervals.maxAsLongArray(thisBlock),
+										Intervals.minAsLongArray(thatBlock),
+										Intervals.maxAsLongArray(thatBlock));
+								throw new RuntimeException("Got the same label in two different blocks -- impossible: " + thisLabel);
+							}
+
+							if (!thisMap.containsKey(thisLabel))
+								thisMap.put(thisLabel, new TLongIntHashMap());
+
+							if (!thatMap.containsKey(thatLabel))
+								thatMap.put(thatLabel, new TLongIntHashMap());
+
+							addOne(thisMap.get(thisLabel), thatLabel);
+							addOne(thatMap.get(thatLabel), thisLabel);
+
+							final TLongLongMap thisArgMax = argMaxCounts(thisMap);
+							final TLongLongMap thatArgMax = argMaxCounts(thatMap);
+
+							thisArgMax.forEachEntry((k, v) -> {
+								if (thatArgMax.get(v) == k)
+									localUF.join(localUF.findRoot(v), localUF.findRoot(k));
+								return true;
+							});
+
+//							thatArgMax.forEachEntry((k, v) -> {
+////								if (thatArgMax.get(v) == k)
+//								localUF.join(localUF.findRoot(v), localUF.findRoot(k));
+////								mapping.put(k, v);
+//								return true;
+//							});
+
+
+						}
+
+					}
+
+					LOG.debug("Returning mapping {}", mapping);
+					return new Tuple2<>(minMax, new Tuple2<>(mapping.keys(), mapping.values()));
+				})
+				.values()
+				.collect();
+
+		for (final Tuple2<long[], long[]> mapping : mappings) {
+			final long[] keys = mapping._1();
+			final long[] vals = mapping._2();
+			for (int index = 0; index < keys.length; ++index) {
+				final long k = keys[index];
+				final long v = vals[index];
+				final long r1 = uf.findRoot(k);
+				final long r2 = uf.findRoot(v);
+				if (r1 != r2) {
+					uf.join(r1, r2);
+					uf.findRoot(r1);
+					uf.findRoot(r2);
+				}
+
+			}
+		}
+
+		return uf;
+
+
+	}
+
 	private static class CropAffinities implements PairFunction<Interval, Interval, RandomAccessibleInterval<FloatType>> {
 
 		private final Supplier<? extends N5Reader> n5in;
@@ -668,6 +889,61 @@ public class SparkWatersheds {
 				target.next().setReal(val > minmimumAffinity ? val : Double.NaN);
 			}
 			return new Tuple2<>(interval, affinityCrop);
+		}
+	}
+
+	private static <T> T toMinMaxTuple(final Interval interval, BiFunction<long[], long[], T> toTuple) {
+		return toTuple.apply(Intervals.minAsLongArray(interval), Intervals.maxAsLongArray(interval));
+	}
+
+	private static void addOne(final TLongIntMap countMap, final long label) {
+		countMap.put(label, countMap.get(label) + 1);
+	}
+
+	private static TLongLongMap argMaxCounts(final TLongObjectMap<TLongIntMap> counts) {
+		final TLongLongMap mapping = new TLongLongHashMap();
+		counts.forEachEntry((k, v) -> {
+			mapping.put(k, argMaxCount(v));
+			return true;
+		});
+		return mapping;
+	}
+
+	private static long argMaxCount(final TLongIntMap counts) {
+		long maxCount = Long.MIN_VALUE;
+		long argMaxCount = 0;
+		for (final TLongIntIterator it = counts.iterator(); it.hasNext(); ) {
+			it.advance();
+			final long v = it.value();
+			if (v > maxCount) {
+				maxCount = v;
+				argMaxCount = it.key();
+			}
+		};
+		return argMaxCount;
+	}
+
+	private static class CachedMapper implements LongUnaryOperator {
+
+
+		private long nextId;
+
+		private final TLongLongMap cache = new TLongLongHashMap();
+
+		private CachedMapper(final long firstId) {
+			this.nextId = firstId;
+		}
+
+		@Override
+		public long applyAsLong(long l) {
+
+			if (l == 0)
+				return 0;
+
+			if (!cache.containsKey(l))
+				cache.put(l, nextId++);
+
+			return cache.get(l);
 		}
 	}
 
