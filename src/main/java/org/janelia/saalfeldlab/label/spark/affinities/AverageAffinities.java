@@ -1,6 +1,7 @@
 package org.janelia.saalfeldlab.label.spark.affinities;
 
 import com.google.gson.annotations.Expose;
+import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
 import net.imglib2.RandomAccessible;
@@ -59,7 +60,7 @@ public class AverageAffinities {
 
 
 		@Expose
-		@CommandLine.Option(names = "--averaged-affinity-dataset", paramLabel = "AFFINITIES", description = "Path of affinities dataset in INPUT_CONTAINER.")
+		@CommandLine.Option(names = "--averaged-affinity-dataset", paramLabel = "AFFINITIES", description = "Output dataset.")
 		String averaged = null;
 
 		@Expose
@@ -183,7 +184,7 @@ public class AverageAffinities {
 						final IntervalView<DoubleType> expanded1 = Views.interval(Views.extendZero(slice1), expandAsNeeded(slice1, offset.offset()));
 						final IntervalView<DoubleType> expanded2 = Views.translate(expanded1, offset.offset());
 
-						LOG.info(
+						LOG.debug(
 								"Averaging {} voxels for offset {} : [{}:{}] ({})",
 								Intervals.numElements(expanded1),
 								offset,
@@ -191,14 +192,29 @@ public class AverageAffinities {
 								Intervals.minAsLongArray(expanded1),
 								Intervals.dimensionsAsLongArray(expanded1));
 
-						LoopBuilder
-								.setImages(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1), expanded1, expanded2)
-								.forEachPixel((a, s1, s2) -> {
-									if (Double.isFinite(a.getRealDouble())) {
-										s1.add(a);
-										s2.add(a);
-									}
-								});
+						final Cursor<DoubleType> source  = Views.flatIterable(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1)).cursor();
+						final Cursor<DoubleType> target1 = Views.flatIterable(expanded1).cursor();
+						final Cursor<DoubleType> target2 = Views.flatIterable(expanded1).cursor();
+
+						while (source.hasNext()) {
+							final DoubleType s = source.next();
+							target1.fwd();
+							target2.fwd();
+							if (Double.isFinite(s.getRealDouble())) {
+								target1.get().add(s);
+								target2.get().add(s);
+							}
+						}
+
+						// TODO LoopBuilder does not work in Spark
+//						LoopBuilder
+//								.setImages(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1), expanded1, expanded2)
+//								.forEachPixel((a, s1, s2) -> {
+//									if (Double.isFinite(a.getRealDouble())) {
+//										s1.add(a);
+//										s2.add(a);
+//									}
+//								});
 					}
 
 					final double factor = 0.5 / enumeratedOffsets.length;
