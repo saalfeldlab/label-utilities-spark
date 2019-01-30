@@ -2,12 +2,18 @@ package org.janelia.saalfeldlab.label.spark.affinities;
 
 import com.google.gson.annotations.Expose;
 import net.imglib2.FinalInterval;
+import net.imglib2.FinalRealInterval;
 import net.imglib2.Interval;
-import net.imglib2.RandomAccessibleInterval;
+import net.imglib2.RandomAccessible;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.img.array.ArrayImg;
+import net.imglib2.img.array.ArrayImgs;
+import net.imglib2.img.basictypeaccess.array.ByteArray;
+import net.imglib2.realtransform.Scale;
 import net.imglib2.type.numeric.integer.UnsignedByteType;
 import net.imglib2.util.ConstantUtils;
 import net.imglib2.util.Intervals;
+import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -22,19 +28,22 @@ import picocli.CommandLine;
 import scala.Tuple2;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
-import java.util.function.DoubleToLongFunction;
 import java.util.function.DoubleUnaryOperator;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 public class MakePredictionMask {
 
 	private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+
+	public static final String NETWORK_SIZE_DIFF_KEY = "networkSizeDiff";
 
 	private static class Args implements Callable<Void> {
 
@@ -43,12 +52,28 @@ public class MakePredictionMask {
 		String maskContainer = null;
 
 		@Expose
+		@CommandLine.Option(names = "--input-container", paramLabel = "INPUT_CONTAINER", description = "Path to N5 container with input dataset. Defaults to MASK_CONTAINER", required = false)
+		String inputContainer = null;
+
+		@Expose
+		@CommandLine.Option(names = "--input-dataset", paramLabel = "INPUT_DATASET", description = "Input dataset either mask or raw data. If raw data, only dimensions are relevant.")
+		String inputDataset = null;
+
+		@Expose
+		@CommandLine.Option(names = "--input-dataset-size", paramLabel = "INPUT_DATASET_SIZE", description = "In voxels. One of INPUT_DATASET_SIZE and INPUT_DATASET must be specified", split=",")
+		long[] inputDatasetSize;
+
+		@Expose
+		@CommandLine.Option(names = "--input-is-mask", defaultValue = "false")
+		Boolean inputIsMask;
+
+		@Expose
 		@CommandLine.Option(names = "--mask-dataset", paramLabel = "MASK_DATASET", description = "Path to mask dataset in mask container. Will be written into", required=true)
 		String maskDataset = null;
 
 		@Expose
-		@CommandLine.Option(names = "--input-size-voxels", paramLabel = "INPUT_SIZE_VOXELS", split =",", required=true)
-		long[] inputSizeVoxels;
+		@CommandLine.Option(names = "--output-dataset-size", paramLabel = "OUTPUT_DATASET_SIZE", description = "In voxels. ", required = true, split=",")
+		long[] outputDatasetSIze;
 
 		@Expose
 		@CommandLine.Option(names = "--input-resolution", paramLabel = "INPUT_RESOLUTION", defaultValue = "36,36,360", split = ",")
@@ -59,16 +84,12 @@ public class MakePredictionMask {
 		double[] outputResolution;
 
 		@Expose
-		@CommandLine.Option(names = "--network-input-size", paramLabel = "INPUT_SIZE", split = ",", description = "World coordinates", defaultValue = "31032,31032,32760")
+		@CommandLine.Option(names = "--network-input-size", paramLabel = "INPUT_SIZE", split = ",", description = "World coordinates", defaultValue = "15480,15480,15480")//"31032,31032,32760")
 		double[] networkInputSizeWorld;
 
 		@Expose
-		@CommandLine.Option(names = "--network-output-size", paramLabel = "OUTPUT_SIZE", split = ",", description = "World coordinates", defaultValue = "23112, 23112, 24840")
+		@CommandLine.Option(names = "--network-output-size", paramLabel = "OUTPUT_SIZE", split = ",", description = "World coordinates", defaultValue = "7800,7560,7560")//"23112, 23112, 24840")
 		double[] networkOutputSizeWorld;
-
-		@Expose
-		@CommandLine.Option(names = "--block-size", paramLabel = "BLOCK_SIZE", description = "defaults to OUTPUT_SIZE / OUTPUT_RESOLUTION")
-		int[] blockSize = null;
 
 		@Expose
 		@CommandLine.Option(names = "--blocks-per-task", defaultValue = "1,1,1", split = ",")
@@ -92,15 +113,31 @@ public class MakePredictionMask {
 
 
 		@Override
-		public Void call() {
+		public Void call() throws Exception {
 
 //			rawContainer = rawContainer == null ? maskContainer : rawContainer;
 //
 //			predictionContainer = predictionContainer == null ? maskContainer : predictionContainer;
+			if (inputDatasetSize == null && inputDataset == null)
+				throw new Exception("One of input dataset size or input dataset must be specified!");
 
-			blockSize = blockSize == null ? asInt(divide(networkOutputSizeWorld, outputResolution)) : blockSize;
+
 
 			return null;
+		}
+
+		public int[] blockSize() {
+
+			return asInt(divide(networkOutputSizeWorld, outputResolution));
+
+		}
+
+		public Supplier<RandomAccessible<UnsignedByteType>> inputMaskSupplier() {
+			if (inputDataset == null) {
+				return new MaskProviderFromDims(inputDatasetSize);
+			} else {
+				throw new UnsupportedOperationException("Not supported yet.");
+			}
 		}
 
 		public double[] snapDimensionsToBlockSize(final double[] dimensionsWorld, final double[] blockSizeWorld) {
@@ -110,8 +147,8 @@ public class MakePredictionMask {
 		}
 
 		public double[] inputSizeWorld() {
-			final double[] inputSizeWorld = new double[inputSizeVoxels.length];
-			Arrays.setAll(inputSizeWorld, d -> inputSizeVoxels[d] * inputResolution[d]);
+			final double[] inputSizeWorld = new double[inputDatasetSize.length];
+			Arrays.setAll(inputSizeWorld, d -> inputDatasetSize[d] * inputResolution[d]);
 			return inputSizeWorld;
 		}
 
@@ -151,23 +188,37 @@ public class MakePredictionMask {
 //		final double[] validMax = subtract(inputSizeWorld, networkSizeDiffHalfWorld);
 
 		final double[] outputDatasetSizeDouble = divide(inputSizeWorldSnappedToOutput, args.outputResolution);
-		final long[] outputDatasetSize = asLong(outputDatasetSizeDouble);
+		final long[] outputDatasetSize = args.outputDatasetSIze;
 
 		final long[] validInputSizeInOutputCoordinates = convertAsLong(divide(inputSizeWorld, args.outputResolution), Math::floor);
 
 		final N5WriterSupplier n5out = new N5WriterSupplier(args.maskContainer, true, true);
-		n5out.get().createDataset(args.maskDataset, outputDatasetSize, args.blockSize, DataType.UINT8, new GzipCompression());
-		n5out.get().setAttribute(args.maskDataset, "networkSizeDiff", networkSizeDiff);
+		n5out.get().createDataset(args.maskDataset, outputDatasetSize, args.blockSize(), DataType.UINT8, new GzipCompression());
+		n5out.get().setAttribute(args.maskDataset, NETWORK_SIZE_DIFF_KEY, networkSizeDiff);
 		n5out.get().setAttribute(args.maskDataset, "resolution", args.outputResolution);
+		n5out.get().setAttribute(args.maskDataset, "min", 0);
+		n5out.get().setAttribute(args.maskDataset, "max", 1);
+		n5out.get().setAttribute(args.maskDataset, "value_range", new double[] {0, 1});
 
-		run(n5out, args.maskDataset, validInputSizeInOutputCoordinates, outputDatasetSize, args.blockSize);
+		run(
+				n5out,
+				args.maskDataset,
+				args.inputResolution,
+				args.outputResolution,
+				networkSizeDiffHalfWorld,
+				args.inputMaskSupplier(),
+				outputDatasetSize,
+				args.blockSize());
 
 	}
 
 	private static void run(
 			final Supplier<? extends N5Writer> n5out,
 			final String maskDataset,
-			final long[] validDimensions,
+			final double[] inputVoxelSize,
+			final double[] outputVoxelSize,
+			final double[] paddingInWorldCoordinates,
+			final Supplier<RandomAccessible<UnsignedByteType>> inputMask,
 			final long[] outputDatasetSize,
 			final int[] blockSize) {
 		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
@@ -180,15 +231,36 @@ public class MakePredictionMask {
 			sc
 					.parallelize(blocks)
 					.foreach(block -> {
-						final Interval interval = new FinalInterval(block._1()._1(), block._1()._2());
-						final RandomAccessibleInterval<UnsignedByteType> insideMask = ConstantUtils.constantRandomAccessibleInterval(
-								new UnsignedByteType(1),
-								interval.numDimensions(),
-								new FinalInterval(validDimensions));
-						LOG.debug("Total dimensions {} valid Dimensions {} interval ({} {})", outputDatasetSize, validDimensions, Intervals.minAsLongArray(interval), Intervals.maxAsLongArray(interval));
+						final long[] min = block._1()._1();
+						final long[] max = block._1()._2();
+						final Interval interval = new FinalInterval(min, max);
+						final RandomAccessible<UnsignedByteType> mask = inputMask.get();
 						final DatasetAttributes attributes = new DatasetAttributes(outputDatasetSize, blockSize, DataType.UINT8, new GzipCompression());
+						final double[] minReal = LongStream.of(min).asDoubleStream().toArray();
+						final double[] maxReal = LongStream.of(max).asDoubleStream().toArray();
+						final Scale outputScale = new Scale(outputVoxelSize);
+						final Scale inputScale = new Scale(inputVoxelSize);
+						outputScale.apply(minReal, minReal);
+						outputScale.apply(maxReal, maxReal);
+						Arrays.setAll(minReal, d -> minReal[d] - paddingInWorldCoordinates[d]);
+						Arrays.setAll(maxReal, d -> maxReal[d] + paddingInWorldCoordinates[d]);
+						inputScale.applyInverse(minReal, minReal);
+						inputScale.applyInverse(maxReal, maxReal);
+						boolean isForeground = true;
+						final IntervalView<UnsignedByteType> inputInterval = Views.interval(mask, Intervals.smallestContainingInterval(new FinalRealInterval(minReal, maxReal)));
+						LOG.debug("Checking interval ({} {}) for block ({} {})", Intervals.minAsLongArray(inputInterval), Intervals.maxAsLongArray(inputInterval), min, max);
+						for (final UnsignedByteType m : inputInterval) {
+							if (m.get() == 0) {
+								isForeground = false;
+								break;
+							}
+						}
+
+						final ArrayImg<UnsignedByteType, ByteArray> outputMask = ArrayImgs.unsignedBytes(Intervals.dimensionsAsLongArray(interval));
+						Arrays.fill(outputMask.update(null).getCurrentStorageArray(), isForeground ? (byte) 1 : 0);
+
 						N5Utils.saveBlock(
-								Views.zeroMin(Views.interval(Views.extendZero(insideMask), interval)),
+								outputMask,
 								n5out.get(),
 								maskDataset,
 								attributes,
@@ -240,6 +312,21 @@ public class MakePredictionMask {
 
 	private static <T> T toMinMaxTuple(final Interval interval, BiFunction<long[], long[], T> toTuple) {
 		return toTuple.apply(Intervals.minAsLongArray(interval), Intervals.maxAsLongArray(interval));
+	}
+
+	private static class MaskProviderFromDims implements Supplier<RandomAccessible<UnsignedByteType>>, Serializable {
+
+
+		private final long[] dims;
+
+		private MaskProviderFromDims(long[] dims) {
+			this.dims = dims;
+		}
+
+		@Override
+		public RandomAccessible<UnsignedByteType> get() {
+			return Views.extendZero(ConstantUtils.constantRandomAccessibleInterval(new UnsignedByteType(1), dims.length, new FinalInterval(dims)));
+		}
 	}
 
 
