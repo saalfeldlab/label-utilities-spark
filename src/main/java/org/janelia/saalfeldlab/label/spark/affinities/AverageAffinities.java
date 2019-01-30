@@ -182,7 +182,7 @@ public class AverageAffinities {
 					for (final Offset offset : enumeratedOffsets) {
 						final RandomAccessible<FloatType> affs = Views.extendZero(Views.hyperSlice(p._2(), min.length, (long) offset.channelIndex()));
 						final IntervalView<DoubleType> expanded1 = Views.interval(Views.extendZero(slice1), expandAsNeeded(slice1, offset.offset()));
-						final IntervalView<DoubleType> expanded2 = Views.translate(expanded1, offset.offset());
+						final IntervalView<DoubleType> expanded2 = Views.interval(Views.offset(Views.extendZero(slice1), offset.offset()), expanded1);
 
 						LOG.debug(
 								"Averaging {} voxels for offset {} : [{}:{}] ({})",
@@ -194,7 +194,7 @@ public class AverageAffinities {
 
 						final Cursor<DoubleType> source  = Views.flatIterable(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1)).cursor();
 						final Cursor<DoubleType> target1 = Views.flatIterable(expanded1).cursor();
-						final Cursor<DoubleType> target2 = Views.flatIterable(expanded1).cursor();
+						final Cursor<DoubleType> target2 = Views.flatIterable(expanded2).cursor();
 
 						while (source.hasNext()) {
 							final DoubleType s = source.next();
