@@ -1,4 +1,4 @@
-package org.janelia.saalfeldlab.label.spark;
+package org.janelia.saalfeldlab.label.spark.watersheds;
 
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.Expose;
@@ -15,7 +15,6 @@ import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
 import net.imglib2.Point;
-import net.imglib2.RandomAccess;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.gauss3.Gauss3;
 import net.imglib2.algorithm.labeling.Watersheds;
@@ -44,6 +43,7 @@ import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.PairFunction;
+import org.janelia.saalfeldlab.label.spark.Version;
 import org.janelia.saalfeldlab.n5.DataBlock;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
