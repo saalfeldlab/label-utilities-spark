@@ -245,6 +245,7 @@ public class SparkWatersheds {
 					args.threshold,
 					args.minimumAffinity,
 					IntStream.of(args.halo).mapToLong(i -> i).toArray(),
+					new MergeWatershedsMedianThreshold(args.threshold),
 					args.averagedAffinities,
 					args.merged,
 					args.blockMerged,
@@ -258,6 +259,109 @@ public class SparkWatersheds {
 
 	}
 
+	private interface MergeWatersheds {
+
+		LongUnaryOperator getMapping(
+				RandomAccessibleInterval<FloatType> relief,
+				RandomAccessibleInterval<UnsignedLongType> labels,
+				long maxId);
+
+	}
+
+	private static class MergeWatershedsMinThreshold implements Supplier<MergeWatersheds>, Serializable {
+
+		private final double threshold;
+
+		private MergeWatershedsMinThreshold(final double threshold) {
+			this.threshold = threshold;
+		}
+
+		@Override
+		public MergeWatersheds get() {
+
+			return (relief, labels, maxId) -> {
+
+
+				final IntArrayUnionFind uf = new IntArrayUnionFind((int) (maxId + 1));
+				for (int d = 0; d < relief.numDimensions(); ++d) {
+					final long[] min1 = Intervals.minAsLongArray(relief);
+					final long[] max1 = Intervals.maxAsLongArray(relief);
+					final long[] min2 = min1.clone();
+					final long[] max2 = max1.clone();
+					max1[d] -= 1;
+					min2[d] += 1;
+					final Cursor<FloatType> reliefCursor1 = Views.flatIterable(Views.interval(relief, min1, max1)).cursor();
+					final Cursor<FloatType> reliefCursor2 = Views.flatIterable(Views.interval(relief, min2, max2)).cursor();
+					final Cursor<UnsignedLongType> labelsCursor1 = Views.flatIterable(Views.interval(labels, min1, max1)).cursor();
+					final Cursor<UnsignedLongType> labelsCursor2 = Views.flatIterable(Views.interval(labels, min2, max2)).cursor();
+					while (reliefCursor1.hasNext()) {
+						reliefCursor1.fwd();
+						reliefCursor2.fwd();
+						labelsCursor1.fwd();
+						labelsCursor2.fwd();
+						if (reliefCursor1.get().getRealDouble() > threshold && reliefCursor2.get().getRealDouble() > threshold){
+							final long r1 = uf.findRoot(labelsCursor1.get().getIntegerLong());
+							final long r2 = uf.findRoot(labelsCursor2.get().getIntegerLong());
+							if (r1 != r2 && r1 != 0 && r2 != 0)
+								uf.join(r1, r2);
+						}
+					}
+				}
+
+				return uf::findRoot;
+
+			};
+
+		}
+	}
+
+	private static class MergeWatershedsMedianThreshold implements Supplier<MergeWatersheds>, Serializable {
+
+		private final double threshold;
+
+		private MergeWatershedsMedianThreshold(final double threshold) {
+			this.threshold = threshold;
+		}
+
+		@Override
+		public MergeWatersheds get() {
+
+			return (relief, labels, maxId) -> {
+
+
+				final IntArrayUnionFind uf = new IntArrayUnionFind((int) (maxId + 1));
+				for (int d = 0; d < relief.numDimensions(); ++d) {
+					final long[] min1 = Intervals.minAsLongArray(relief);
+					final long[] max1 = Intervals.maxAsLongArray(relief);
+					final long[] min2 = min1.clone();
+					final long[] max2 = max1.clone();
+					max1[d] -= 1;
+					min2[d] += 1;
+					final Cursor<FloatType> reliefCursor1 = Views.flatIterable(Views.interval(relief, min1, max1)).cursor();
+					final Cursor<FloatType> reliefCursor2 = Views.flatIterable(Views.interval(relief, min2, max2)).cursor();
+					final Cursor<UnsignedLongType> labelsCursor1 = Views.flatIterable(Views.interval(labels, min1, max1)).cursor();
+					final Cursor<UnsignedLongType> labelsCursor2 = Views.flatIterable(Views.interval(labels, min2, max2)).cursor();
+					while (reliefCursor1.hasNext()) {
+						reliefCursor1.fwd();
+						reliefCursor2.fwd();
+						labelsCursor1.fwd();
+						labelsCursor2.fwd();
+						if (reliefCursor1.get().getRealDouble() > threshold && reliefCursor2.get().getRealDouble() > threshold){
+							final long r1 = uf.findRoot(labelsCursor1.get().getIntegerLong());
+							final long r2 = uf.findRoot(labelsCursor2.get().getIntegerLong());
+							if (r1 != r2 && r1 != 0 && r2 != 0)
+								uf.join(r1, r2);
+						}
+					}
+				}
+
+				return uf::findRoot;
+
+			};
+
+		}
+	}
+
 	public static void run(
 			final JavaSparkContext sc,
 			final Supplier<? extends N5Reader> n5in,
@@ -266,6 +370,7 @@ public class SparkWatersheds {
 			final double mergeThreshold,
 			final double minimumWatershedAffinity,
 			final long[] halo,
+			final Supplier<MergeWatersheds> mergeWatershedregions,
 			final String averagedAffinities,
 			final String merged,
 			final String blockMerged,
@@ -294,11 +399,15 @@ public class SparkWatersheds {
 				.mapToPair(t -> {
 					final Interval block = t._1();
 					final RandomAccessibleInterval<FloatType> relief = t._2();
+					// we expect that there are no NaNs in the relief. Replace NaNs with Double.NEGATIVE_INFINITY as appropriate
+					// Any point that is surrounded entirely by NaN will be added as seed point by default. This is not the behavior
+					// we would like to have
 					List<Point> seeds = LocalExtrema
 							.findLocalExtrema(
 									Views.extendValue(relief, new FloatType(Float.MIN_VALUE)),
 									relief,
 									new LocalExtrema.MaximumCheck<>(new FloatType((float)minimumWatershedAffinity)));
+					LOG.debug("Got {} seeds", seeds.size());
 
 					final CellGrid grid = new CellGrid(outputDims, blockSize);
 					final CellGrid watershedsGrid = new CellGrid(outputDims, watershedBlockSize);
@@ -309,13 +418,6 @@ public class SparkWatersheds {
 					grid.getCellPosition(blockOffset, blockOffset);
 					watershedsGrid.getCellPosition(watershedsBlockOffset, watershedsBlockOffset);
 					LOG.debug("min={} blockOffset={} watershedsBlockOffset={}", Intervals.minAsLongArray(block), blockOffset, watershedsBlockOffset);
-
-					final RandomAccess<FloatType> reliefAccess = relief.randomAccess();
-					final List<Point> seeds = seedCandidates.stream().filter(p -> {
-						reliefAccess.setPosition(p);
-						return reliefAccess.get().getRealDouble() > mergeThreshold;
-					})
-							.collect(Collectors.toList());
 
 					final long[] dims = Intervals.dimensionsAsLongArray(relief);
 					final ArrayImg<UnsignedLongType, LongArray> labels = ArrayImgs.unsignedLongs(dims);
@@ -885,8 +987,12 @@ public class SparkWatersheds {
 			final ArrayImg<FloatType, FloatArray> affinityCrop = ArrayImgs.floats(Intervals.dimensionsAsLongArray(withHalo));
 			final Cursor<FloatType> source = Views.flatIterable(Views.interval(Views.extendValue(affs, new FloatType(Float.NaN)), withHalo)).cursor();
 			final Cursor<FloatType> target = Views.flatIterable(affinityCrop).cursor();
+			// need to ensure that all NaN voxels are replaced with zeros
+			// otherwise, LocalExtrema.MaximumCheck adds too many points and everything gets slow!
 			while (source.hasNext()) {
-				target.next().set(source.next());
+				final double val = source.next().getRealDouble();
+				target.next().setReal(Double.isNaN(val) ? Double.NEGATIVE_INFINITY : val);
+
 			}
 
 			return new Tuple2<>(interval, affinityCrop);
