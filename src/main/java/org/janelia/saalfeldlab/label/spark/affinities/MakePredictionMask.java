@@ -10,6 +10,7 @@ import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgs;
 import net.imglib2.img.basictypeaccess.array.ByteArray;
 import net.imglib2.realtransform.Scale;
+import net.imglib2.type.NativeType;
 import net.imglib2.type.numeric.integer.UnsignedByteType;
 import net.imglib2.util.ConstantUtils;
 import net.imglib2.util.Intervals;
@@ -20,6 +21,7 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.saalfeldlab.n5.N5FSReader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.slf4j.Logger;
@@ -121,6 +123,9 @@ public class MakePredictionMask {
 			if (inputDatasetSize == null && inputDataset == null)
 				throw new Exception("One of input dataset size or input dataset must be specified!");
 
+			if (inputDataset != null)
+				inputDatasetSize = new N5FSReader(inputContainer).getDatasetAttributes(inputDataset).getDimensions();
+
 
 
 			return null;
@@ -133,10 +138,12 @@ public class MakePredictionMask {
 		}
 
 		public Supplier<RandomAccessible<UnsignedByteType>> inputMaskSupplier() {
-			if (inputDataset == null) {
+			if (inputDataset == null || !inputIsMask) {
 				return new MaskProviderFromDims(inputDatasetSize);
 			} else {
-				throw new UnsupportedOperationException("Not supported yet.");
+				return new MaskProviderFromN5(
+						new N5WriterSupplier(inputContainer, false, false),
+						inputDataset);
 			}
 		}
 
@@ -249,6 +256,7 @@ public class MakePredictionMask {
 						boolean isForeground = true;
 						final IntervalView<UnsignedByteType> inputInterval = Views.interval(mask, Intervals.smallestContainingInterval(new FinalRealInterval(minReal, maxReal)));
 						LOG.debug("Checking interval ({} {}) for block ({} {})", Intervals.minAsLongArray(inputInterval), Intervals.maxAsLongArray(inputInterval), min, max);
+						// TODO use integral images instead of discarding entire blocks
 						for (final UnsignedByteType m : inputInterval) {
 							if (m.get() == 0) {
 								isForeground = false;
@@ -258,6 +266,9 @@ public class MakePredictionMask {
 
 						final ArrayImg<UnsignedByteType, ByteArray> outputMask = ArrayImgs.unsignedBytes(Intervals.dimensionsAsLongArray(interval));
 						Arrays.fill(outputMask.update(null).getCurrentStorageArray(), isForeground ? (byte) 1 : 0);
+						// this is bad alignment area in cremi sample_A+
+//						for (long z = Math.max(min[2], 344); z < Math.min(max[2], 357); ++z)
+//							Views.hyperSlice(Views.translate(outputMask, min), 2, z).forEach(UnsignedByteType::setZero);
 
 						N5Utils.saveBlock(
 								outputMask,
@@ -327,6 +338,28 @@ public class MakePredictionMask {
 		public RandomAccessible<UnsignedByteType> get() {
 			return Views.extendZero(ConstantUtils.constantRandomAccessibleInterval(new UnsignedByteType(1), dims.length, new FinalInterval(dims)));
 		}
+	}
+
+	private static class MaskProviderFromN5 implements Supplier<RandomAccessible<UnsignedByteType>>, Serializable {
+
+		private final N5WriterSupplier n5;
+
+		private final String dataset;
+
+		private MaskProviderFromN5(N5WriterSupplier n5, String dataset) {
+			this.n5 = n5;
+			this.dataset = dataset;
+		}
+
+		@Override
+		public RandomAccessible<UnsignedByteType> get() {
+			try {
+				return Views.extendValue(N5Utils.open(n5.get(), dataset), new UnsignedByteType(0));
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+
 	}
 
 
