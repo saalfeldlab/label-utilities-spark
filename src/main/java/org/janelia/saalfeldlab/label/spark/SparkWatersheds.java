@@ -294,7 +294,7 @@ public class SparkWatersheds {
 				.mapToPair(t -> {
 					final Interval block = t._1();
 					final RandomAccessibleInterval<FloatType> relief = t._2();
-					List<Point> seedCandidates = LocalExtrema
+					List<Point> seeds = LocalExtrema
 							.findLocalExtrema(
 									Views.extendValue(relief, new FloatType(Float.MIN_VALUE)),
 									relief,
@@ -311,14 +311,6 @@ public class SparkWatersheds {
 					LOG.debug("min={} blockOffset={} watershedsBlockOffset={}", Intervals.minAsLongArray(block), blockOffset, watershedsBlockOffset);
 
 					final RandomAccess<FloatType> reliefAccess = relief.randomAccess();
-					List<Point> seeds = seedCandidates
-							.stream()
-							.filter(p -> {
-								reliefAccess.setPosition(p);
-								final double a = reliefAccess.get().getRealDouble();
-								return !Double.isNaN(a) && a > minimumWatershedAffinity;
-							})
-							.collect(Collectors.toList());
 
 					final long[] dims = Intervals.dimensionsAsLongArray(relief);
 					final ArrayImg<UnsignedLongType, LongArray> labels = ArrayImgs.unsignedLongs(dims);
