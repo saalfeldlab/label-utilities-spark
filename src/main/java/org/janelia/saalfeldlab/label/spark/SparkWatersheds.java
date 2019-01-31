@@ -455,6 +455,7 @@ public class SparkWatersheds {
 				throw new RuntimeException("Currently only Integer.MAX_VALUE labels supported");
 
 			final IntArrayUnionFind uf = findOverlappingLabelsArgMaxNoHalo(sc, n5out, merged, new IntArrayUnionFind((int) (maxId + 2)), outputDims, blockSize, blocksPerTask, 0);
+			LOG.debug("{} sets are grouped into {} sets", uf.size(), uf.setCount());
 
 			final List<Tuple2<Tuple2<long[], long[]>, Tuple2<long[], long[]>>> finalMappings = new ArrayList<>();
 			long maxRoot = 0;
@@ -463,7 +464,7 @@ public class SparkWatersheds {
 				final long minLabel = idOffset._2();
 				final long maxLabel = index < idOffsets.size() - 1
 						? idOffsets.get(index + 1)._2()
-						: (maxId + 2);
+						: (maxId);
 
 				LOG.debug("Max label = {} min label = {} for block ({} {})", maxLabel, minLabel, idOffset._1()._1(), idOffset._1()._2());
 				final long[] keys = new long[(int) (maxLabel - minLabel)];
@@ -737,39 +738,28 @@ public class SparkWatersheds {
 		final List<Tuple2<long[], long[]>> mappings = sc
 				.parallelize(doubleSizeBlocks)
 				.mapToPair(minMax -> {
-					final CellGrid grid = new CellGrid(dimensions, blockSize);
 					final long[] thisBlockMax = minMax._2();
-					final long[] thisBlockMin = new long[thisBlockMax.length];
-					grid.getCellPosition(thisBlockMax, thisBlockMin);
-					Arrays.setAll(thisBlockMin, d -> grid.getCellMin(d, thisBlockMin[d] - 1));
 
 					final RandomAccessibleInterval<UnsignedLongType> labels = N5Utils.open(n5.get(), labelDataset);
-					final RandomAccessibleInterval<UnsignedLongType> thisBlock = Views.interval(labels, thisBlockMin, thisBlockMax);
+					final RandomAccessibleInterval<UnsignedLongType> thisBlock = Views.interval(labels, minMax._1(), thisBlockMax);
 
 					final TLongSet ignoreTheseSet = new TLongHashSet(ignoreThese);
 
 					final TLongLongHashMap mapping = new TLongLongHashMap();
 					final UnionFind localUF = new LongHashMapUnionFind(mapping, 0, Long::compare);
 
-					LOG.debug("This block: ({} {})", Intervals.minAsLongArray(thisBlock), Intervals.maxAsLongArray(thisBlock));
-
-					for (int dim = 0; dim < thisBlock.numDimensions(); ++dim) {
-						final long[] thatBlockMin = thisBlockMin.clone();
-						thatBlockMin[dim] = thisBlockMax[dim] + 1;
-						if (thatBlockMin[dim] >= dimensions[dim]) {
-							LOG.debug("That block min {} outside dimensions {}", thatBlockMin, dimensions);
+					for (int dim = 0; dim < thisBlockMax.length; ++dim) {
+						final long thisSliceIndex = thisBlockMax[dim];
+						final long thatSliceIndex = thisSliceIndex + 1;
+						if (thatSliceIndex >= dimensions[dim]) {
+							LOG.debug("That slice index {} outside dimensions {}", thatSliceIndex, dimensions);
 							continue;
 						}
-						final long[] thatBlockMax = new long[thatBlockMin.length];
-						Arrays.setAll(thatBlockMax, d -> Math.min(thatBlockMin[d] + taskBlockSize[d], dimensions[d]) - 1);
 
-						final RandomAccessibleInterval<UnsignedLongType> thatBlock = Views.interval(labels, thatBlockMin, thatBlockMax);
-
-						LOG.debug("That block: ({} {})", Intervals.minAsLongArray(thatBlock), Intervals.maxAsLongArray(thatBlock));
-
-						LOG.debug("Slicing this block to {} and that block to {} for dim {}", thisBlockMax[dim], thatBlockMin[dim], dim);
-						RandomAccessibleInterval<UnsignedLongType> thisSlice = Views.hyperSlice(thisBlock, dim, thisBlockMax[dim]);
-						RandomAccessibleInterval<UnsignedLongType> thatSlice = Views.hyperSlice(thatBlock, dim, thatBlockMin[dim]);
+						LOG.debug("Slicing this block to {} and that block to {} for dim {}", thatSliceIndex, thatSliceIndex, dim);
+						final Interval interval = Views.hyperSlice(thisBlock, dim, thisBlock.min(dim));
+						RandomAccessibleInterval<UnsignedLongType> thisSlice = Views.interval(Views.hyperSlice(labels, dim, thisSliceIndex), interval);
+						RandomAccessibleInterval<UnsignedLongType> thatSlice = Views.interval(Views.hyperSlice(labels, dim, thatSliceIndex), interval);
 						LOG.debug("This slice: ({} {})", Intervals.minAsLongArray(thisSlice), Intervals.maxAsLongArray(thisSlice));
 						LOG.debug("That slice: ({} {})", Intervals.minAsLongArray(thatSlice), Intervals.maxAsLongArray(thatSlice));
 
@@ -788,11 +778,10 @@ public class SparkWatersheds {
 
 							if (thisLabel == thatLabel) {
 								LOG.error(
-										"Found same label {} in blocks ({} {}) and ({} {})",
-										thisLabel, Intervals.minAsLongArray(thisBlock),
-										Intervals.maxAsLongArray(thisBlock),
-										Intervals.minAsLongArray(thatBlock),
-										Intervals.maxAsLongArray(thatBlock));
+										"Found same label {} in slices {} and {} for dimension {}",
+										thisLabel,
+										thisSliceIndex,
+										thatSliceIndex);
 								throw new RuntimeException("Got the same label in two different blocks -- impossible: " + thisLabel);
 							}
 
@@ -805,15 +794,6 @@ public class SparkWatersheds {
 							addOne(thisMap.get(thisLabel), thatLabel);
 							addOne(thatMap.get(thatLabel), thisLabel);
 
-							final TLongLongMap thisArgMax = argMaxCounts(thisMap);
-							final TLongLongMap thatArgMax = argMaxCounts(thatMap);
-
-							thisArgMax.forEachEntry((k, v) -> {
-								if (thatArgMax.get(v) == k)
-									localUF.join(localUF.findRoot(v), localUF.findRoot(k));
-								return true;
-							});
-
 //							thatArgMax.forEachEntry((k, v) -> {
 ////								if (thatArgMax.get(v) == k)
 //								localUF.join(localUF.findRoot(v), localUF.findRoot(k));
@@ -823,6 +803,18 @@ public class SparkWatersheds {
 
 
 						}
+
+						LOG.debug("Mapping this to that {}", thisMap);
+						LOG.debug("Mapping that to this {}", thatMap);
+
+						final TLongLongMap thisArgMax = argMaxCounts(thisMap);
+						final TLongLongMap thatArgMax = argMaxCounts(thatMap);
+
+						thisArgMax.forEachEntry((k, v) -> {
+							if (thatArgMax.get(v) == k)
+								localUF.join(localUF.findRoot(v), localUF.findRoot(k));
+							return true;
+						});
 
 					}
 
