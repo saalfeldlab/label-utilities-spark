@@ -242,10 +242,9 @@ public class SparkWatersheds {
 					n5in,
 					n5out,
 					outputDims,
-					args.threshold,
 					args.minimumAffinity,
 					IntStream.of(args.halo).mapToLong(i -> i).toArray(),
-					new MergeWatershedsMedianThreshold(args.threshold),
+					new SerializableMergeWatershedsMinThresholdSupplier(args.threshold),
 					args.averagedAffinities,
 					args.merged,
 					args.blockMerged,
@@ -259,115 +258,11 @@ public class SparkWatersheds {
 
 	}
 
-	private interface MergeWatersheds {
-
-		LongUnaryOperator getMapping(
-				RandomAccessibleInterval<FloatType> relief,
-				RandomAccessibleInterval<UnsignedLongType> labels,
-				long maxId);
-
-	}
-
-	private static class MergeWatershedsMinThreshold implements Supplier<MergeWatersheds>, Serializable {
-
-		private final double threshold;
-
-		private MergeWatershedsMinThreshold(final double threshold) {
-			this.threshold = threshold;
-		}
-
-		@Override
-		public MergeWatersheds get() {
-
-			return (relief, labels, maxId) -> {
-
-
-				final IntArrayUnionFind uf = new IntArrayUnionFind((int) (maxId + 1));
-				for (int d = 0; d < relief.numDimensions(); ++d) {
-					final long[] min1 = Intervals.minAsLongArray(relief);
-					final long[] max1 = Intervals.maxAsLongArray(relief);
-					final long[] min2 = min1.clone();
-					final long[] max2 = max1.clone();
-					max1[d] -= 1;
-					min2[d] += 1;
-					final Cursor<FloatType> reliefCursor1 = Views.flatIterable(Views.interval(relief, min1, max1)).cursor();
-					final Cursor<FloatType> reliefCursor2 = Views.flatIterable(Views.interval(relief, min2, max2)).cursor();
-					final Cursor<UnsignedLongType> labelsCursor1 = Views.flatIterable(Views.interval(labels, min1, max1)).cursor();
-					final Cursor<UnsignedLongType> labelsCursor2 = Views.flatIterable(Views.interval(labels, min2, max2)).cursor();
-					while (reliefCursor1.hasNext()) {
-						reliefCursor1.fwd();
-						reliefCursor2.fwd();
-						labelsCursor1.fwd();
-						labelsCursor2.fwd();
-						if (reliefCursor1.get().getRealDouble() > threshold && reliefCursor2.get().getRealDouble() > threshold){
-							final long r1 = uf.findRoot(labelsCursor1.get().getIntegerLong());
-							final long r2 = uf.findRoot(labelsCursor2.get().getIntegerLong());
-							if (r1 != r2 && r1 != 0 && r2 != 0)
-								uf.join(r1, r2);
-						}
-					}
-				}
-
-				return uf::findRoot;
-
-			};
-
-		}
-	}
-
-	private static class MergeWatershedsMedianThreshold implements Supplier<MergeWatersheds>, Serializable {
-
-		private final double threshold;
-
-		private MergeWatershedsMedianThreshold(final double threshold) {
-			this.threshold = threshold;
-		}
-
-		@Override
-		public MergeWatersheds get() {
-
-			return (relief, labels, maxId) -> {
-
-
-				final IntArrayUnionFind uf = new IntArrayUnionFind((int) (maxId + 1));
-				for (int d = 0; d < relief.numDimensions(); ++d) {
-					final long[] min1 = Intervals.minAsLongArray(relief);
-					final long[] max1 = Intervals.maxAsLongArray(relief);
-					final long[] min2 = min1.clone();
-					final long[] max2 = max1.clone();
-					max1[d] -= 1;
-					min2[d] += 1;
-					final Cursor<FloatType> reliefCursor1 = Views.flatIterable(Views.interval(relief, min1, max1)).cursor();
-					final Cursor<FloatType> reliefCursor2 = Views.flatIterable(Views.interval(relief, min2, max2)).cursor();
-					final Cursor<UnsignedLongType> labelsCursor1 = Views.flatIterable(Views.interval(labels, min1, max1)).cursor();
-					final Cursor<UnsignedLongType> labelsCursor2 = Views.flatIterable(Views.interval(labels, min2, max2)).cursor();
-					while (reliefCursor1.hasNext()) {
-						reliefCursor1.fwd();
-						reliefCursor2.fwd();
-						labelsCursor1.fwd();
-						labelsCursor2.fwd();
-						if (reliefCursor1.get().getRealDouble() > threshold && reliefCursor2.get().getRealDouble() > threshold){
-							final long r1 = uf.findRoot(labelsCursor1.get().getIntegerLong());
-							final long r2 = uf.findRoot(labelsCursor2.get().getIntegerLong());
-							if (r1 != r2 && r1 != 0 && r2 != 0)
-								uf.join(r1, r2);
-						}
-					}
-				}
-
-				return uf::findRoot;
-
-			};
-
-		}
-	}
-
 	public static void run(
 			final JavaSparkContext sc,
 			final Supplier<? extends N5Reader> n5in,
 			final Supplier<? extends N5Writer> n5out,
 			final long[] outputDims,
-			final double mergeThreshold,
 			final double minimumWatershedAffinity,
 			final long[] halo,
 			final Supplier<MergeWatersheds> mergeWatershedregions,
@@ -465,31 +360,7 @@ public class SparkWatersheds {
 						n5out.get().writeBlock(seededWatersheds, watershedAttributes, dataBlock);
 					}
 
-					final IntArrayUnionFind uf = new IntArrayUnionFind(seeds.size() + 1);
-					for (int d = 0; d < relief.numDimensions(); ++d) {
-						final long[] min1 = Intervals.minAsLongArray(relief);
-						final long[] max1 = Intervals.maxAsLongArray(relief);
-						final long[] min2 = min1.clone();
-						final long[] max2 = max1.clone();
-						max1[d] -= 1;
-						min2[d] += 1;
-						final Cursor<FloatType> reliefCursor1 = Views.flatIterable(Views.interval(relief, min1, max1)).cursor();
-						final Cursor<FloatType> reliefCursor2 = Views.flatIterable(Views.interval(relief, min2, max2)).cursor();
-						final Cursor<UnsignedLongType> labelsCursor1 = Views.flatIterable(Views.interval(labels, min1, max1)).cursor();
-						final Cursor<UnsignedLongType> labelsCursor2 = Views.flatIterable(Views.interval(labels, min2, max2)).cursor();
-						while (reliefCursor1.hasNext()) {
-							reliefCursor1.fwd();
-							reliefCursor2.fwd();
-							labelsCursor1.fwd();
-							labelsCursor2.fwd();
-							if (reliefCursor1.get().getRealDouble() > mergeThreshold && reliefCursor2.get().getRealDouble() > mergeThreshold){
-								final long r1 = uf.findRoot(labelsCursor1.get().getIntegerLong());
-								final long r2 = uf.findRoot(labelsCursor2.get().getIntegerLong());
-								if (r1 != r2 && r1 != 0 && r2 != 0)
-									uf.join(r1, r2);
-							}
-						}
-					}
+					final LongUnaryOperator mapping = mergeWatershedregions.get().getMapping(relief, labels, seeds.size() + 1);
 
 					// TODO find better logic instead of label == 0 check
 					final TLongSet ids = new TLongHashSet();
@@ -499,7 +370,7 @@ public class SparkWatersheds {
 						if (label == 0)
 							counts.put(label, counts.get(label) + 1);
 						else {
-							final long root = uf.findRoot(pix.getIntegerLong());
+							final long root = mapping.applyAsLong(pix.getIntegerLong());
 							ids.add(root);
 							counts.put(root, counts.get(root) + 1);
 							if (root != 0)
