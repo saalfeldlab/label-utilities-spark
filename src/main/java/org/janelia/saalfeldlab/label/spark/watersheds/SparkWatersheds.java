@@ -244,7 +244,8 @@ public class SparkWatersheds {
 					outputDims,
 					args.minimumAffinity,
 					IntStream.of(args.halo).mapToLong(i -> i).toArray(),
-					new SerializableMergeWatershedsMinThresholdSupplier(args.threshold),
+//					new SerializableMergeWatershedsMinThresholdSupplier(args.threshold),
+					new SerializableMergeWatershedsMedianThresholdSupplier(args.threshold),
 					args.averagedAffinities,
 					args.merged,
 					args.blockMerged,
@@ -392,7 +393,6 @@ public class SparkWatersheds {
 						n5out.get().writeBlock(merged, watershedAttributes, dataBlock);
 					}
 
-					// TODO this should probably be max(ids) rather than ids.size()
 					return new Tuple2<>(new Tuple2<>(Intervals.minAsLongArray(t._1()), Intervals.maxAsLongArray(t._1())), ids.size());
 				})
 				.collect()

@@ -1,6 +1,7 @@
 package org.janelia.saalfeldlab.label.spark.watersheds;
 
 import net.imglib2.Cursor;
+import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.unionfind.IntArrayUnionFind;
 import net.imglib2.type.numeric.integer.UnsignedLongType;
 import net.imglib2.type.numeric.real.FloatType;
@@ -8,6 +9,7 @@ import net.imglib2.util.Intervals;
 import net.imglib2.view.Views;
 
 import java.io.Serializable;
+import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 
 class SerializableMergeWatershedsMinThresholdSupplier implements Supplier<MergeWatersheds>, Serializable {
@@ -18,12 +20,13 @@ class SerializableMergeWatershedsMinThresholdSupplier implements Supplier<MergeW
 		this.threshold = threshold;
 	}
 
-	@Override
-	public MergeWatersheds get() {
+	private final class MW implements MergeWatersheds, Serializable {
 
-		return (relief, labels, maxId) -> {
-
-
+		@Override
+		public LongUnaryOperator getMapping(
+				final RandomAccessibleInterval<FloatType> relief,
+				final RandomAccessibleInterval<UnsignedLongType> labels,
+				final long maxId) {
 			final IntArrayUnionFind uf = new IntArrayUnionFind((int) (maxId + 1));
 			for (int d = 0; d < relief.numDimensions(); ++d) {
 				final long[] min1 = Intervals.minAsLongArray(relief);
@@ -51,8 +54,11 @@ class SerializableMergeWatershedsMinThresholdSupplier implements Supplier<MergeW
 			}
 
 			return uf::findRoot;
+		}
+	}
 
-		};
-
+	@Override
+	public MergeWatersheds get() {
+		return new MW();
 	}
 }
