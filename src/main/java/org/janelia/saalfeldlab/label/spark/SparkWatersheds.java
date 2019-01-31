@@ -15,6 +15,7 @@ import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
 import net.imglib2.Point;
+import net.imglib2.RandomAccess;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.gauss3.Gauss3;
 import net.imglib2.algorithm.labeling.Watersheds;
@@ -293,7 +294,7 @@ public class SparkWatersheds {
 				.mapToPair(t -> {
 					final Interval block = t._1();
 					final RandomAccessibleInterval<FloatType> relief = t._2();
-					List<Point> seeds = LocalExtrema
+					List<Point> seedCandidates = LocalExtrema
 							.findLocalExtrema(
 									Views.extendValue(relief, new FloatType(Float.MIN_VALUE)),
 									relief,
@@ -308,6 +309,16 @@ public class SparkWatersheds {
 					grid.getCellPosition(blockOffset, blockOffset);
 					watershedsGrid.getCellPosition(watershedsBlockOffset, watershedsBlockOffset);
 					LOG.debug("min={} blockOffset={} watershedsBlockOffset={}", Intervals.minAsLongArray(block), blockOffset, watershedsBlockOffset);
+
+					final RandomAccess<FloatType> reliefAccess = relief.randomAccess();
+					List<Point> seeds = seedCandidates
+							.stream()
+							.filter(p -> {
+								reliefAccess.setPosition(p);
+								final double a = reliefAccess.get().getRealDouble();
+								return !Double.isNaN(a) && a > minimumWatershedAffinity;
+							})
+							.collect(Collectors.toList());
 
 					final long[] dims = Intervals.dimensionsAsLongArray(relief);
 					final ArrayImg<UnsignedLongType, LongArray> labels = ArrayImgs.unsignedLongs(dims);
