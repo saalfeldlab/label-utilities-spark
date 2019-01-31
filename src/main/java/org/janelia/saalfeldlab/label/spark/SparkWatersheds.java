@@ -311,6 +311,11 @@ public class SparkWatersheds {
 					LOG.debug("min={} blockOffset={} watershedsBlockOffset={}", Intervals.minAsLongArray(block), blockOffset, watershedsBlockOffset);
 
 					final RandomAccess<FloatType> reliefAccess = relief.randomAccess();
+					final List<Point> seeds = seedCandidates.stream().filter(p -> {
+						reliefAccess.setPosition(p);
+						return reliefAccess.get().getRealDouble() > mergeThreshold;
+					})
+							.collect(Collectors.toList());
 
 					final long[] dims = Intervals.dimensionsAsLongArray(relief);
 					final ArrayImg<UnsignedLongType, LongArray> labels = ArrayImgs.unsignedLongs(dims);
@@ -414,6 +419,7 @@ public class SparkWatersheds {
 						n5out.get().writeBlock(merged, watershedAttributes, dataBlock);
 					}
 
+					// TODO this should probably be max(ids) rather than ids.size()
 					return new Tuple2<>(new Tuple2<>(Intervals.minAsLongArray(t._1()), Intervals.maxAsLongArray(t._1())), ids.size());
 				})
 				.collect()
@@ -879,7 +885,9 @@ public class SparkWatersheds {
 			final ArrayImg<FloatType, FloatArray> affinityCrop = ArrayImgs.floats(Intervals.dimensionsAsLongArray(withHalo));
 			final Cursor<FloatType> source = Views.flatIterable(Views.interval(Views.extendValue(affs, new FloatType(Float.NaN)), withHalo)).cursor();
 			final Cursor<FloatType> target = Views.flatIterable(affinityCrop).cursor();
-			while (source.hasNext()) target.next().set(source.next());
+			while (source.hasNext()) {
+				target.next().set(source.next());
+			}
 
 			return new Tuple2<>(interval, affinityCrop);
 		}
