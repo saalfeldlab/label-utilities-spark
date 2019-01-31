@@ -1,19 +1,36 @@
 package org.janelia.saalfeldlab.label.spark.affinities;
 
 import com.google.gson.annotations.Expose;
+import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
+import net.imglib2.RandomAccess;
 import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
+import net.imglib2.algorithm.morphology.Erosion;
+import net.imglib2.algorithm.neighborhood.CenteredRectangleShape;
+import net.imglib2.algorithm.neighborhood.Neighborhood;
+import net.imglib2.algorithm.neighborhood.RectangleNeighborhood;
+import net.imglib2.algorithm.neighborhood.RectangleShape;
+import net.imglib2.algorithm.neighborhood.Shape;
 import net.imglib2.algorithm.util.Grids;
 import net.imglib2.converter.Converters;
 import net.imglib2.converter.RealDoubleConverter;
 import net.imglib2.converter.RealFloatConverter;
+import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgs;
+import net.imglib2.img.basictypeaccess.array.ByteArray;
 import net.imglib2.loops.LoopBuilder;
+import net.imglib2.roi.Mask;
+import net.imglib2.type.logic.BitType;
+import net.imglib2.type.numeric.integer.UnsignedByteType;
+import net.imglib2.type.numeric.integer.UnsignedLongType;
 import net.imglib2.type.numeric.real.DoubleType;
 import net.imglib2.type.numeric.real.FloatType;
+import net.imglib2.util.ConstantUtils;
 import net.imglib2.util.Intervals;
+import net.imglib2.util.StopWatch;
+import net.imglib2.view.ExtendedRandomAccessibleInterval;
 import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
@@ -21,6 +38,7 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.saalfeldlab.n5.N5FSReader;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
@@ -31,12 +49,16 @@ import pl.touk.throwing.ThrowingBiConsumer;
 import scala.Tuple2;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 public class AverageAffinities {
@@ -54,12 +76,23 @@ public class AverageAffinities {
 		String outputContainer = null;
 
 		@Expose
+		@CommandLine.Option(names = "--mask-container", paramLabel = "MASK_CONTAINER", description = "Path to mask container. Defaults to INPUT_CONTAINER")
+		String maskContainer = null;
+
+		@Expose
 		@CommandLine.Option(names = "--affinity-dataset", paramLabel = "AFFINITIES", description = "Path of affinities dataset in INPUT_CONTAINER.")
 		String affinities = "volumes/affinities/prediction";
 
+		@Expose
+		@CommandLine.Option(names = "--mask-dataset", paramLabel = "MASK", description = "Binary mask for valid affinities. 1: yes, 0: no. Will assume entire data set is masked 1 if not provided.")
+		String mask = null;
 
 		@Expose
-		@CommandLine.Option(names = "--averaged-affinity-dataset", paramLabel = "AFFINITIES", description = "Path of affinities dataset in INPUT_CONTAINER.")
+		@CommandLine.Option(names = "--network-fov-diff", paramLabel = "FOV_DIFF", description = "Network input/output fov diff in output voxels. If not provided, will use attribute `networkSizeDiff' in MASK else default to 0", split = ",")
+		long[] networkFovDiff;
+
+		@Expose
+		@CommandLine.Option(names = "--averaged-affinity-dataset", paramLabel = "AFFINITIES", description = "Output dataset.")
 		String averaged = null;
 
 		@Expose
@@ -104,6 +137,16 @@ public class AverageAffinities {
 			if (blockSize == null)
 				blockSize = subArray(attributes.getBlockSize(), 0, attributes.getNumDimensions() - 1);
 
+			if (maskContainer == null)
+				maskContainer = inputContainer;
+
+			if (networkFovDiff == null)
+				if (mask != null)
+					networkFovDiff = new N5FSReader(maskContainer).getAttribute(mask, MakePredictionMask.NETWORK_SIZE_DIFF_KEY, long[].class);
+
+			if (networkFovDiff == null)
+				networkFovDiff = new long[3];
+
 			return null;
 		}
 
@@ -142,6 +185,7 @@ public class AverageAffinities {
 					args.blocksPerTask,
 					n5InSupplier,
 					n5OutSupplier,
+					new MaskSupplier(new N5WriterSupplier(args.maskContainer, false, false), args.mask, args.networkFovDiff),
 					args.affinities,
 					args.averaged,
 					args.enumeratedOffsets());
@@ -155,6 +199,7 @@ public class AverageAffinities {
 			final int[] blocksPerTask,
 			final N5WriterSupplier n5InSupplier,
 			final N5WriterSupplier n5OutSupplier,
+			final MaskSupplier maskSupplier,
 			final String affinities,
 			final String averaged,
 			final Offset[] enumeratedOffsets) throws IOException {
@@ -176,12 +221,14 @@ public class AverageAffinities {
 				.map(p -> {
 					final long[] min = p._1()._1();
 					final long[] max = p._1()._2();
+					final RandomAccessible<UnsignedByteType> maskRA = maskSupplier.get();
 					final RandomAccessibleInterval<DoubleType> averagedAffinities = ArrayImgs.doubles(Intervals.dimensionsAsLongArray(new FinalInterval(min, max)));
 					final RandomAccessibleInterval<DoubleType> slice1 = Views.translate(averagedAffinities, min);
+					final UnsignedByteType zero = new UnsignedByteType(0);
 					for (final Offset offset : enumeratedOffsets) {
 						final RandomAccessible<FloatType> affs = Views.extendZero(Views.hyperSlice(p._2(), min.length, (long) offset.channelIndex()));
 						final IntervalView<DoubleType> expanded1 = Views.interval(Views.extendZero(slice1), expandAsNeeded(slice1, offset.offset()));
-						final IntervalView<DoubleType> expanded2 = Views.translate(expanded1, offset.offset());
+						final IntervalView<DoubleType> expanded2 = Views.interval(Views.offset(Views.extendZero(slice1), offset.offset()), expanded1);
 
 						LOG.info(
 								"Averaging {} voxels for offset {} : [{}:{}] ({})",
@@ -191,14 +238,49 @@ public class AverageAffinities {
 								Intervals.minAsLongArray(expanded1),
 								Intervals.dimensionsAsLongArray(expanded1));
 
-						LoopBuilder
-								.setImages(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1), expanded1, expanded2)
-								.forEachPixel((a, s1, s2) -> {
-									if (Double.isFinite(a.getRealDouble())) {
-										s1.add(a);
-										s2.add(a);
-									}
-								});
+						final Cursor<DoubleType>       source  = Views.flatIterable(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1)).cursor();
+						final Cursor<UnsignedByteType> mask    = Views.flatIterable(Views.interval(maskRA, expanded1)).cursor();
+						final Cursor<DoubleType>       target1 = Views.flatIterable(expanded1).cursor();
+						final Cursor<DoubleType>       target2 = Views.flatIterable(expanded2).cursor();
+
+						final DoubleType nan = new DoubleType(Double.NaN);
+
+						final StopWatch sw = new StopWatch();
+						sw.start();
+						while (source.hasNext()) {
+							final DoubleType s = source.next();
+							final boolean isInvalid = mask.next().valueEquals(zero);
+							target1.fwd();
+							target2.fwd();
+
+							if (isInvalid) {
+								target1.get().add(nan);
+								target2.get().add(nan);
+							} else if (Double.isFinite(s.getRealDouble())) {
+								target1.get().add(s);
+								target2.get().add(s);
+							}
+						}
+						sw.stop();
+
+						LOG.info(
+								"Averaged {} voxels for offset {} : [{}:{}] ({}) in {}s",
+								Intervals.numElements(expanded1),
+								offset,
+								Intervals.minAsLongArray(expanded1),
+								Intervals.minAsLongArray(expanded1),
+								Intervals.dimensionsAsLongArray(expanded1),
+								sw.nanoTime() * 1e-9);
+
+						// TODO LoopBuilder does not work in Spark
+//						LoopBuilder
+//								.setImages(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1), expanded1, expanded2)
+//								.forEachPixel((a, s1, s2) -> {
+//									if (Double.isFinite(a.getRealDouble())) {
+//										s1.add(a);
+//										s2.add(a);
+//									}
+//								});
 					}
 
 					final double factor = 0.5 / enumeratedOffsets.length;
@@ -263,6 +345,22 @@ public class AverageAffinities {
 		final int[] result = new int[stop - start];
 		Arrays.setAll(result, d -> array[d] + start);
 		return result;
+	}
+
+	private static class MaskSupplier implements Serializable{
+
+		private final N5WriterSupplier container;
+
+		private final String dataset;
+
+		private MaskSupplier(N5WriterSupplier container, String dataset, long[] fovDiff) {
+			this.container = container;
+			this.dataset = dataset;
+		}
+
+		public RandomAccessible<UnsignedByteType> get() throws IOException {
+			return Views.extendValue(N5Utils.open(container.get(), dataset), new UnsignedByteType(0));
+		}
 	}
 
 }
