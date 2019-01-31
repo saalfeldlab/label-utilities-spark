@@ -884,10 +884,7 @@ public class SparkWatersheds {
 			final ArrayImg<FloatType, FloatArray> affinityCrop = ArrayImgs.floats(Intervals.dimensionsAsLongArray(withHalo));
 			final Cursor<FloatType> source = Views.flatIterable(Views.interval(Views.extendValue(affs, new FloatType(Float.NaN)), withHalo)).cursor();
 			final Cursor<FloatType> target = Views.flatIterable(affinityCrop).cursor();
-			while (target.hasNext()) {
-				final double val = source.next().getRealDouble();
-				target.next().setReal(val > minmimumAffinity ? val : Double.NaN);
-			}
+
 			return new Tuple2<>(interval, affinityCrop);
 		}
 	}
