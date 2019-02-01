@@ -112,20 +112,24 @@ public class SparkWatersheds {
 		String averagedAffinities = "volumes/averagedAffinities/prediction-average";
 
 		@Expose
-		@CommandLine.Option(names = "--watershed-seeds-dataset")
-		String watershedSeeds = "volumes/labels/watershed_seeds";
+		@CommandLine.Option(names = "--label-datasets-prefix", paramLabel = "LABEL_DATASETS_PREFIX", defaultValue = "volumes/labels", description = "Will be prepended to datasets: ${LABEL_DATASETS_PREFIX}/${LABEL_DATASET}. Set to empty String to ignore.")
+		String labelDatasetsPrefix;
 
 		@Expose
-		@CommandLine.Option(names = "--seeded-watersheds-dataset", paramLabel = "WATERSHEDS", description = "Path to watersheds in OUTPUT_CONTAINER")
-		String seededWatersheds = "volumes/labels/seeded_watersheds";
+		@CommandLine.Option(names = "--watershed-seeds-dataset", description = "Path in container: ${LABEL_DATASETS_PREFIX}/${WATERSHED_SEEDS_DATASET", defaultValue = "watershed-seeds")
+		String watershedSeeds = "watershed-seeds";
 
 		@Expose
-		@CommandLine.Option(names = "--merged-dataset", paramLabel = "WATERSHEDS_MERGED", description = "Path to region merged in OUTPUT_CONTAINER")
-		String merged = "volumes/labels/seeded_watersheds_merged";
+		@CommandLine.Option(names = "--seeded-watersheds-dataset", paramLabel = "WATERSHEDS", description = "Path in container: ${LABEL_DATASETS_PREFIX}/${WATERSHEDS}", defaultValue = "seeded-watersheds")
+		String seededWatersheds;
 
 		@Expose
-		@CommandLine.Option(names = "--block-merged-dataset", paramLabel = "WATERSHEDS_MERGED", description = "Path to region merged in OUTPUT_CONTAINER")
-		String blockMerged = "volumes/labels/seeded_watersheds_block_merged";
+		@CommandLine.Option(names = "--merged-dataset", paramLabel = "WATERSHEDS_MERGED", description = "Path in container: ${LABEL_DATASETS_PREFIX}/${WATERSHEDS_MERGED}", defaultValue = "watersheds-merged")
+		String merged;
+
+		@Expose
+		@CommandLine.Option(names = "--block-merged-dataset", paramLabel = "MERGED", description = "Path in container: ${LABEL_DATASETS_PREFIX}/${MERGED}", defaultValue = "merged")
+		String blockMerged;
 
 		@Expose
 		@CommandLine.Option(names = "--block-size", paramLabel = "BLOCK_SIZE", description = "Block size of output.", split = ",")
@@ -171,6 +175,10 @@ public class SparkWatersheds {
 		@Override
 		public Void call() {
 
+			watershedSeeds = String.join("/", labelDatasetsPrefix, watershedSeeds);
+			seededWatersheds = String.join("/", labelDatasetsPrefix, seededWatersheds);
+			merged = String.join("/", labelDatasetsPrefix, merged);
+			blockMerged = String.join("/", labelDatasetsPrefix, blockMerged);
 			return null;
 		}
 	}
