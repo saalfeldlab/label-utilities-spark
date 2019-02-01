@@ -5,13 +5,13 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import org.janelia.saalfeldlab.label.spark.LabelTools.Tool.FromString;
-import org.janelia.saalfeldlab.label.spark.affinities.SparkWatersheds;
 import org.janelia.saalfeldlab.label.spark.convert.ConvertToLabelMultisetType;
 import org.janelia.saalfeldlab.label.spark.downsample.SparkDownsampler;
 import org.janelia.saalfeldlab.label.spark.uniquelabels.ExtractUniqueLabelsPerBlock;
 import org.janelia.saalfeldlab.label.spark.uniquelabels.LabelToBlockMapping;
 import org.janelia.saalfeldlab.label.spark.uniquelabels.downsample.LabelListDownsampler;
 
+import org.janelia.saalfeldlab.label.spark.watersheds.SparkWatersheds;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.ITypeConverter;
@@ -21,14 +21,14 @@ import picocli.CommandLine.Parameters;
 public class LabelTools
 {
 
-	public static enum Tool
+	public enum Tool
 	{
 		CONVERT( ConvertToLabelMultisetType::run ),
 		DOWNSAMPLE( SparkDownsampler::run ),
 		EXTRACT_UNIQUE_LABELS( ExtractUniqueLabelsPerBlock::run ),
 		DOWNSAMPLE_UNIQUE_LABELS( LabelListDownsampler::run ),
 		LABEL_TO_BLOCK_MAPPING( LabelToBlockMapping::run ),
-		AFFINITY_WATERSHEDS( SparkWatersheds::run );
+		WATERSHEDS( SparkWatersheds::run );
 
 		private interface ExceptionConsumer< T >
 		{
