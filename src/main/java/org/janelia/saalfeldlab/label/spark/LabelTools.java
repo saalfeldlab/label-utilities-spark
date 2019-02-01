@@ -5,6 +5,8 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import org.janelia.saalfeldlab.label.spark.LabelTools.Tool.FromString;
+import org.janelia.saalfeldlab.label.spark.affinities.AverageAffinities;
+import org.janelia.saalfeldlab.label.spark.affinities.MakePredictionMask;
 import org.janelia.saalfeldlab.label.spark.convert.ConvertToLabelMultisetType;
 import org.janelia.saalfeldlab.label.spark.downsample.SparkDownsampler;
 import org.janelia.saalfeldlab.label.spark.uniquelabels.ExtractUniqueLabelsPerBlock;
@@ -28,7 +30,9 @@ public class LabelTools
 		EXTRACT_UNIQUE_LABELS( ExtractUniqueLabelsPerBlock::run ),
 		DOWNSAMPLE_UNIQUE_LABELS( LabelListDownsampler::run ),
 		LABEL_TO_BLOCK_MAPPING( LabelToBlockMapping::run ),
-		WATERSHEDS( SparkWatersheds::run );
+		WATERSHEDS( SparkWatersheds::run ),
+		MAKE_PREDICTION_MASK( MakePredictionMask::run ),
+		AVERAGE_AFFINITIES( AverageAffinities::run );
 
 		private interface ExceptionConsumer< T >
 		{

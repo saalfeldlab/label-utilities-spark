@@ -163,6 +163,10 @@ public class AverageAffinities {
 	}
 
 	public static void main(String[] argv) throws IOException {
+		run(argv);
+	}
+
+	public static void run(String[] argv) throws IOException {
 
 		final Args args = new Args();
 		CommandLine.call(args, argv);
