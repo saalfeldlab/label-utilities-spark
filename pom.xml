@@ -9,7 +9,7 @@
 
 	<groupId>org.janelia.saalfeldlab</groupId>
 	<artifactId>label-utilities-spark</artifactId>
-	<version>0.6.1-SNAPSHOT</version>
+	<version>0.6.2-SNAPSHOT</version>
 
 	<name>N5-Label-Multisets-Spark</name>
 	<description>Spark based tools for label data.</description>
