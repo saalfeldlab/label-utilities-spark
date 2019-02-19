@@ -4,27 +4,16 @@ import com.google.gson.annotations.Expose;
 import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
-import net.imglib2.RandomAccess;
 import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
-import net.imglib2.algorithm.morphology.Erosion;
-import net.imglib2.algorithm.neighborhood.CenteredRectangleShape;
-import net.imglib2.algorithm.neighborhood.Neighborhood;
-import net.imglib2.algorithm.neighborhood.RectangleNeighborhood;
-import net.imglib2.algorithm.neighborhood.RectangleShape;
-import net.imglib2.algorithm.neighborhood.Shape;
 import net.imglib2.algorithm.util.Grids;
 import net.imglib2.converter.Converters;
 import net.imglib2.converter.RealDoubleConverter;
 import net.imglib2.converter.RealFloatConverter;
-import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgs;
-import net.imglib2.img.basictypeaccess.array.ByteArray;
-import net.imglib2.loops.LoopBuilder;
-import net.imglib2.roi.Mask;
-import net.imglib2.type.logic.BitType;
+import net.imglib2.type.NativeType;
+import net.imglib2.type.numeric.RealType;
 import net.imglib2.type.numeric.integer.UnsignedByteType;
-import net.imglib2.type.numeric.integer.UnsignedLongType;
 import net.imglib2.type.numeric.real.DoubleType;
 import net.imglib2.type.numeric.real.FloatType;
 import net.imglib2.util.ConstantUtils;
@@ -40,12 +29,14 @@ import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.N5FSReader;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
+import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 import pl.touk.throwing.ThrowingBiConsumer;
+import pl.touk.throwing.ThrowingSupplier;
 import scala.Tuple2;
 
 import java.io.IOException;
@@ -54,11 +45,9 @@ import java.lang.invoke.MethodHandles;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Callable;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 public class AverageAffinities {
@@ -80,12 +69,28 @@ public class AverageAffinities {
 		String maskContainer = null;
 
 		@Expose
+		@CommandLine.Option(names = "--glia-mask-container", paramLabel = "GLIA_MASK_CONTAINER", description = "Path to glia mask container. Defaults to INPUT_CONTAINER")
+		String gliaMaskContainer = null;
+
+		@Expose
 		@CommandLine.Option(names = "--affinity-dataset", paramLabel = "AFFINITIES", description = "Path of affinities dataset in INPUT_CONTAINER.")
 		String affinities = "volumes/affinities/prediction";
 
 		@Expose
 		@CommandLine.Option(names = "--mask-dataset", paramLabel = "MASK", description = "Binary mask for valid affinities. 1: yes, 0: no. Will assume entire data set is masked 1 if not provided.")
 		String mask = null;
+
+		@Expose
+		@CommandLine.Option(names = "--glia-mask-dataset", paramLabel = "GLIA_MASK", description = "Mask to indicate glia cells. Inverse (GLIA_MASK_MAX - GLIA_MASK) scales averaged affinities. Will default to all zeros if not specified.")
+		String gliaMask = null;
+
+		@Expose
+		@CommandLine.Option(names = "--glia-mask-max", paramLabel = "GLIA_MASK_MAX", description = "Upper bound for glia mask", defaultValue = "1.0")
+		Double gliaMaskMax = 1.0;
+
+		@Expose
+		@CommandLine.Option(names = "--glia-mask-min", paramLabel = "GLIA_MASK_MIN", description = "Lower bound for glia mask", defaultValue = "0.0")
+		Double gliaMaskMin = 0.0;
 
 		@Expose
 		@CommandLine.Option(names = "--network-fov-diff", paramLabel = "FOV_DIFF", description = "Network input/output fov diff in output voxels. If not provided, will use attribute `networkSizeDiff' in MASK else default to 0", split = ",")
@@ -140,6 +145,9 @@ public class AverageAffinities {
 			if (maskContainer == null)
 				maskContainer = inputContainer;
 
+			if (gliaMaskContainer == null)
+				gliaMaskContainer = inputContainer;
+
 			if (networkFovDiff == null)
 				if (mask != null)
 					networkFovDiff = new N5FSReader(maskContainer).getAttribute(mask, MakePredictionMask.NETWORK_SIZE_DIFF_KEY, long[].class);
@@ -189,7 +197,8 @@ public class AverageAffinities {
 					args.blocksPerTask,
 					n5InSupplier,
 					n5OutSupplier,
-					new MaskSupplier(new N5WriterSupplier(args.maskContainer, false, false), args.mask, args.networkFovDiff),
+					new MaskSupplier(new N5WriterSupplier(args.maskContainer, false, true), args.mask, args.networkFovDiff),
+					args.gliaMask == null ? new ConstantValueRandomAccessibleSupplier(1.0) : new GliaMaskSupplier(new N5WriterSupplier(args.gliaMaskContainer, false, true), args.gliaMask, args.gliaMaskMin, args.gliaMaskMax),
 					args.affinities,
 					args.averaged,
 					args.enumeratedOffsets());
@@ -204,6 +213,7 @@ public class AverageAffinities {
 			final N5WriterSupplier n5InSupplier,
 			final N5WriterSupplier n5OutSupplier,
 			final MaskSupplier maskSupplier,
+			final Supplier<RandomAccessible<FloatType>> invertedGliaMaskSupplier,
 			final String affinities,
 			final String averaged,
 			final Offset[] enumeratedOffsets) throws IOException {
@@ -290,6 +300,10 @@ public class AverageAffinities {
 					final double factor = 0.5 / enumeratedOffsets.length;
 					Views.iterable(slice1).forEach(px -> px.mul(factor));
 
+					final RandomAccessible<FloatType> invertedGliaMask = invertedGliaMaskSupplier.get();
+					final IntervalView<DoubleType> translatedSlice = Views.translate(slice1, min);
+					Views.iterable(Views.interval(Views.pair(invertedGliaMask, translatedSlice), translatedSlice)).forEach(pair -> pair.getB().mul(pair.getA().getRealDouble()));
+
 					final N5Writer n5 = n5OutSupplier.get();
 					final DatasetAttributes attributes = n5.getDatasetAttributes(averaged);
 					final long[] gridOffset = min.clone();
@@ -364,6 +378,75 @@ public class AverageAffinities {
 
 		public RandomAccessible<UnsignedByteType> get() throws IOException {
 			return Views.extendValue(N5Utils.open(container.get(), dataset), new UnsignedByteType(0));
+		}
+	}
+
+	private static class ConstantValueRandomAccessibleSupplier implements Serializable, Supplier<RandomAccessible<FloatType>> {
+
+		private final double value;
+
+		private final int nDim;
+
+		private ConstantValueRandomAccessibleSupplier(double value) {
+			this.value = value;
+			this.nDim = 3;
+		}
+
+		public RandomAccessible<FloatType> get() {
+			return getConstantMask();
+		}
+
+		public RandomAccessible<FloatType> getConstantMask() {
+			final FloatType ft = new FloatType();
+			ft.setReal(value);
+			return ConstantUtils.constantRandomAccessible(ft, nDim);
+		}
+	}
+
+	private static class GliaMaskSupplier implements Serializable, Supplier<RandomAccessible<FloatType>> {
+
+		private final N5WriterSupplier container;
+
+		private final String dataset;
+
+		private final double minBound;
+
+		private final double maxBound;
+
+		private GliaMaskSupplier(N5WriterSupplier container, String dataset, double minBound, double maxBound) {
+			this.container = container;
+			this.dataset = dataset;
+			this.minBound = minBound;
+			this.maxBound = maxBound;
+		}
+
+		public RandomAccessible<FloatType> getChecked() throws IOException {
+			final RandomAccessibleInterval<FloatType> data = getAndConvertIfNecessary(container.get());
+			final FloatType extension = new FloatType();
+			extension.setReal(minBound);
+			final RandomAccessible<FloatType> extended = Views.extendValue(data, extension);
+			return Converters.convert(extended, (s, t) -> t.setReal(maxBound - Math.min(maxBound, Math.max(minBound, s.getRealDouble()))), new FloatType());
+		}
+
+		@Override
+		public RandomAccessible<FloatType> get() {
+			return ThrowingSupplier.unchecked(this::getChecked).get();
+		}
+
+		private RandomAccessibleInterval<FloatType> getAndConvertIfNecessary(final N5Reader reader) throws IOException {
+			final DataType dtype = reader.getDatasetAttributes(dataset).getDataType();
+			switch (dtype) {
+				case FLOAT32:
+					return N5Utils.open(reader, dataset);
+				default:
+					return readAndConvert(reader);
+			}
+		}
+
+		private <T extends NativeType<T> & RealType<T>> RandomAccessibleInterval<FloatType> readAndConvert(final N5Reader reader) throws IOException {
+
+			final RandomAccessibleInterval<T> ds = N5Utils.open(reader, dataset);
+			return Converters.convert(ds, new RealFloatConverter<>(), new FloatType());
 		}
 	}
 
