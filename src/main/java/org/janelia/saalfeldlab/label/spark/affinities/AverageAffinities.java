@@ -301,8 +301,8 @@ public class AverageAffinities {
 					Views.iterable(slice1).forEach(px -> px.mul(factor));
 
 					final RandomAccessible<FloatType> invertedGliaMask = invertedGliaMaskSupplier.get();
-					final IntervalView<DoubleType> translatedSlice = Views.translate(slice1, min);
-					Views.iterable(Views.interval(Views.pair(invertedGliaMask, translatedSlice), translatedSlice)).forEach(pair -> pair.getB().mul(pair.getA().getRealDouble()));
+//					final IntervalView<DoubleType> translatedSlice = Views.translate(slice1, min);
+					Views.interval(Views.pair(invertedGliaMask, slice1), slice1).forEach(pair -> pair.getB().mul(pair.getA().getRealDouble()));
 
 					final N5Writer n5 = n5OutSupplier.get();
 					final DatasetAttributes attributes = n5.getDatasetAttributes(averaged);
