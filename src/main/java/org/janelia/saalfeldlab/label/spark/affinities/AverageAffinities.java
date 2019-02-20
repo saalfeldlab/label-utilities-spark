@@ -93,6 +93,10 @@ public class AverageAffinities {
 		Double gliaMaskMin = 0.0;
 
 		@Expose
+		@CommandLine.Option(names = "--glia-mask-threshold", paramLabel = "GLIA_MASK_THRESHOLD", description = "If specified and not NaN, set averaged affinities to NaN if above threshold.")
+		Double gliaMaskThreshold = Double.NaN;
+
+		@Expose
 		@CommandLine.Option(names = "--network-fov-diff", paramLabel = "FOV_DIFF", description = "Network input/output fov diff in output voxels. If not provided, will use attribute `networkSizeDiff' in MASK else default to 0", split = ",")
 		long[] networkFovDiff;
 
@@ -155,6 +159,14 @@ public class AverageAffinities {
 			if (networkFovDiff == null)
 				networkFovDiff = new long[3];
 
+			if (!Double.isNaN(gliaMaskThreshold))
+				gliaMaskThreshold = gliaMaskThreshold >= gliaMaskMax
+						? Double.NEGATIVE_INFINITY
+						: gliaMaskThreshold <= gliaMaskMin
+							? Double.POSITIVE_INFINITY
+							: gliaMaskMax - gliaMaskThreshold;
+			System.out.println("Inverse glia mask threshold is " + gliaMaskThreshold);
+
 			return null;
 		}
 
@@ -189,6 +201,10 @@ public class AverageAffinities {
 		n5InSupplier.get().listAttributes(args.affinities).forEach(ThrowingBiConsumer.unchecked((key, clazz) -> n5OutSupplier.get().setAttribute(args.averaged, key, n5InSupplier.get().getAttribute(args.affinities, key, clazz))));
 		n5OutSupplier.get().createDataset(args.averaged, ignoreLast(inputAttributes.getDimensions()), args.blockSize, DataType.FLOAT32, new GzipCompression());
 
+		final Supplier<RandomAccessible<FloatType>> gliaMaskSupplier = args.gliaMask == null
+				? new ConstantValueRandomAccessibleSupplier(1.0)
+				: new GliaMaskSupplier(new N5WriterSupplier(args.gliaMaskContainer, false, true), args.gliaMask, args.gliaMaskMin, args.gliaMaskMax);
+
 		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getSimpleName());
 		try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
 			run(
@@ -198,7 +214,8 @@ public class AverageAffinities {
 					n5InSupplier,
 					n5OutSupplier,
 					new MaskSupplier(new N5WriterSupplier(args.maskContainer, false, true), args.mask, args.networkFovDiff),
-					args.gliaMask == null ? new ConstantValueRandomAccessibleSupplier(1.0) : new GliaMaskSupplier(new N5WriterSupplier(args.gliaMaskContainer, false, true), args.gliaMask, args.gliaMaskMin, args.gliaMaskMax),
+					gliaMaskSupplier,
+					args.gliaMaskThreshold,
 					args.affinities,
 					args.averaged,
 					args.enumeratedOffsets());
@@ -214,6 +231,7 @@ public class AverageAffinities {
 			final N5WriterSupplier n5OutSupplier,
 			final MaskSupplier maskSupplier,
 			final Supplier<RandomAccessible<FloatType>> invertedGliaMaskSupplier,
+			final double gliaMaskThreshold,
 			final String affinities,
 			final String averaged,
 			final Offset[] enumeratedOffsets) throws IOException {
@@ -297,12 +315,19 @@ public class AverageAffinities {
 //								});
 					}
 
+					// TODO combine the three loops into a single loop. Probably not that much overhead, though
 					final double factor = 0.5 / enumeratedOffsets.length;
 					Views.iterable(slice1).forEach(px -> px.mul(factor));
 
 					final RandomAccessible<FloatType> invertedGliaMask = invertedGliaMaskSupplier.get();
 //					final IntervalView<DoubleType> translatedSlice = Views.translate(slice1, min);
 					Views.interval(Views.pair(invertedGliaMask, slice1), slice1).forEach(pair -> pair.getB().mul(pair.getA().getRealDouble()));
+					LOG.info("Glia mask threshold is {}", gliaMaskThreshold);
+					if (!Double.isNaN(gliaMaskThreshold)) {
+						LOG.info("Setting values with inverted glia mask values < {} to NaN", gliaMaskThreshold);
+						Views.interval(Views.pair(invertedGliaMask, slice1), slice1)
+								.forEach(pair -> pair.getB().set(pair.getA().getRealDouble() <= gliaMaskThreshold ? Double.NaN : pair.getB().getRealDouble()));
+					}
 
 					final N5Writer n5 = n5OutSupplier.get();
 					final DatasetAttributes attributes = n5.getDatasetAttributes(averaged);
@@ -315,6 +340,7 @@ public class AverageAffinities {
 							averaged,
 							attributes,
 							gridOffset);
+					LOG.info("Successfully saved block {}", gridOffset);
 
 					return true;
 				})
@@ -421,7 +447,7 @@ public class AverageAffinities {
 		}
 
 		public RandomAccessible<FloatType> getChecked() throws IOException {
-			final RandomAccessibleInterval<FloatType> data = getAndConvertIfNecessary(container.get());
+			final RandomAccessibleInterval<FloatType> data = readAndConvert(container.get());
 			final FloatType extension = new FloatType();
 			extension.setReal(minBound);
 			final RandomAccessible<FloatType> extended = Views.extendValue(data, extension);
