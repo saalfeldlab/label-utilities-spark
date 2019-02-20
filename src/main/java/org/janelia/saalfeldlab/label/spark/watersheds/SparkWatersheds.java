@@ -3,6 +3,8 @@ package org.janelia.saalfeldlab.label.spark.watersheds;
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.Expose;
 import gnu.trove.iterator.TLongIntIterator;
+import gnu.trove.iterator.TLongObjectIterator;
+import gnu.trove.list.array.TDoubleArrayList;
 import gnu.trove.map.TLongIntMap;
 import gnu.trove.map.TLongLongMap;
 import gnu.trove.map.TLongObjectMap;
@@ -21,7 +23,6 @@ import net.imglib2.algorithm.labeling.Watersheds;
 import net.imglib2.algorithm.localextrema.LocalExtrema;
 import net.imglib2.algorithm.neighborhood.DiamondShape;
 import net.imglib2.algorithm.util.Grids;
-import net.imglib2.algorithm.util.unionfind.IntArrayUnionFind;
 import net.imglib2.algorithm.util.unionfind.LongHashMapUnionFind;
 import net.imglib2.algorithm.util.unionfind.UnionFind;
 import net.imglib2.img.array.ArrayImg;
@@ -76,6 +77,7 @@ import java.util.concurrent.Callable;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.LongFunction;
 import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -254,6 +256,7 @@ public class SparkWatersheds {
 					IntStream.of(args.halo).mapToLong(i -> i).toArray(),
 //					new SerializableMergeWatershedsMinThresholdSupplier(args.threshold),
 					new SerializableMergeWatershedsMedianThresholdSupplier(args.threshold),
+					args.threshold,
 					args.averagedAffinities,
 					args.merged,
 					args.blockMerged,
@@ -275,6 +278,7 @@ public class SparkWatersheds {
 			final double minimumWatershedAffinity,
 			final long[] halo,
 			final Supplier<MergeWatersheds> mergeWatershedregions,
+			final double mergeFragmentsThreshold,
 			final String averagedAffinities,
 			final String merged,
 			final String blockMerged,
@@ -444,7 +448,19 @@ public class SparkWatersheds {
 			if (maxId + 2 > Integer.MAX_VALUE)
 				throw new RuntimeException("Currently only Integer.MAX_VALUE labels supported");
 
-			final IntArrayUnionFind uf = findOverlappingLabelsArgMaxNoHalo(sc, n5out, merged, new IntArrayUnionFind((int) (maxId + 2)), outputDims, blockSize, blocksPerTask, 0);
+//			final IntArrayUnionFind uf = findOverlappingLabelsArgMaxNoHalo(sc, n5out, merged, new IntArrayUnionFind((int) (maxId + 2)), outputDims, blockSize, blocksPerTask, 0);
+			final LongHashMapUnionFind uf = findOverlappingLabelsThresholdMedianEdgeAffinities(
+					sc,
+					n5out,
+					n5in,
+					merged,
+					averagedAffinities,
+					mergeFragmentsThreshold,
+					new LongHashMapUnionFind(),
+					outputDims,
+					blockSize,
+					blocksPerTask,
+					0);
 			LOG.debug("{} sets are grouped into {} sets", uf.size(), uf.setCount());
 
 			final List<Tuple2<Tuple2<long[], long[]>, Tuple2<long[], long[]>>> finalMappings = new ArrayList<>();
@@ -701,6 +717,170 @@ public class SparkWatersheds {
 		}
 	}
 
+	private static <UF extends UnionFind> UF findOverlappingLabelsThresholdMedianEdgeAffinities(
+			final JavaSparkContext sc,
+			final Supplier<? extends N5Reader> labelContainer,
+			final Supplier<? extends N5Reader> affinitiesContainer,
+			final String labelDataset,
+			final String affinitiesDataset,
+			final double threshold,
+			final UF uf,
+			final long[] dimensions,
+			final int[] blockSize,
+			final int[] blocksPerTask,
+			final long... ignoreThese) {
+
+		Objects.requireNonNull(sc);
+		Objects.requireNonNull(blockSize);
+		Objects.requireNonNull(blocksPerTask);
+		Objects.requireNonNull(ignoreThese);
+
+		// TODO: 2/20/19
+
+		final int[] taskBlockSize = new int[blockSize.length];
+		Arrays.setAll(taskBlockSize, d -> blockSize[d] * blocksPerTask[d]);
+
+		final List<Tuple2<long[], long[]>> doubleSizeBlocks = Grids
+				.collectAllContainedIntervals(dimensions, taskBlockSize)
+				.stream()
+				.map(interval -> SparkWatersheds.toMinMaxTuple(interval, Tuple2::new))
+				.collect(Collectors.toList());
+
+		final List<Tuple2<long[], long[]>> mappings = sc
+				.parallelize(doubleSizeBlocks)
+				.mapToPair(minMax -> {
+					final long[] thisBlockMax = minMax._2();
+
+					final RandomAccessibleInterval<UnsignedLongType> labels = N5Utils.open(labelContainer.get(), labelDataset);
+					final RandomAccessibleInterval<UnsignedLongType> thisBlockLabels = Views.interval(labels, minMax._1(), thisBlockMax);
+					final RandomAccessibleInterval<FloatType> affinities = N5Utils.open(affinitiesContainer.get(), affinitiesDataset);
+
+
+					final TLongSet ignoreTheseSet = new TLongHashSet(ignoreThese);
+
+					final TLongLongHashMap mapping = new TLongLongHashMap();
+					final UnionFind localUF = new LongHashMapUnionFind(mapping, 0, Long::compare);
+
+					for (int dim = 0; dim < thisBlockMax.length; ++dim) {
+						final long thisSliceIndex = thisBlockMax[dim];
+						final long thatSliceIndex = thisSliceIndex + 1;
+						if (thatSliceIndex >= dimensions[dim]) {
+							LOG.debug("That slice index {} outside dimensions {}", thatSliceIndex, dimensions);
+							continue;
+						}
+
+						LOG.debug("Slicing this block to {} and that block to {} for dim {}", thatSliceIndex, thatSliceIndex, dim);
+						// TODO once Intervals.hyperSlice is available on imglib2 release, we do not need to use Views.hyperSlice here
+						// imglib/imglib2@62998cd
+						final Interval interval = Views.hyperSlice(thisBlockLabels, dim, thisBlockLabels.min(dim));
+						RandomAccessibleInterval<UnsignedLongType> thisSliceLabels = Views.interval(Views.hyperSlice(labels, dim, thisSliceIndex), interval);
+						RandomAccessibleInterval<UnsignedLongType> thatSliceLabels = Views.interval(Views.hyperSlice(labels, dim, thatSliceIndex), interval);
+						RandomAccessibleInterval<FloatType> thisSliceAffinities = Views.interval(Views.hyperSlice(affinities, dim, thisSliceIndex), interval);
+						RandomAccessibleInterval<FloatType> thatSliceAffinities = Views.interval(Views.hyperSlice(affinities, dim, thatSliceIndex), interval);
+						LOG.debug("This slice: ({} {})", Intervals.minAsLongArray(thisSliceLabels), Intervals.maxAsLongArray(thisSliceLabels));
+						LOG.debug("That slice: ({} {})", Intervals.minAsLongArray(thatSliceLabels), Intervals.maxAsLongArray(thatSliceLabels));
+
+						final Cursor<UnsignedLongType> thisCursorLabels = Views.flatIterable(thisSliceLabels).cursor();
+						final Cursor<UnsignedLongType> thatCursorLabels = Views.flatIterable(thatSliceLabels).cursor();
+
+						final Cursor<FloatType> thisCursorAffinities = Views.flatIterable(thisSliceAffinities).cursor();
+						final Cursor<FloatType> thatCursorAffiniities = Views.flatIterable(thatSliceAffinities).cursor();
+
+						final TLongObjectMap<TLongObjectMap<TDoubleArrayList>> affinitiesByEdge = new TLongObjectHashMap<>();
+						final LongFunction<TDoubleArrayList> emptyListFactory = key -> new TDoubleArrayList();
+						final LongFunction<TLongObjectMap<TDoubleArrayList>> emptyMapFactory = key -> new TLongObjectHashMap<>();
+
+						while (thisCursorLabels.hasNext()) {
+							final long thisLabel = thisCursorLabels.next().getIntegerLong();
+							final long thatLabel = thatCursorLabels.next().getIntegerLong();
+
+							final double thisAffinity = thisCursorAffinities.next().getRealDouble();
+							final double thatAffinity = thatCursorAffiniities.next().getRealDouble();
+
+							if (ignoreTheseSet.contains(thisLabel) || ignoreTheseSet.contains(thatLabel))
+								continue;
+
+							if (thisLabel == thatLabel) {
+								LOG.error(
+										"Found same label {} in slices {} and {} for dimension {}",
+										thisLabel,
+										thisSliceIndex,
+										thatSliceIndex);
+								throw new RuntimeException("Got the same label in two different blocks -- impossible: " + thisLabel);
+							}
+
+							final long e1, e2;
+							if (thisLabel < thatLabel) {
+								e1 = thisLabel;
+								e2 = thatLabel;
+							}
+							else {
+								e1 = thatLabel;
+								e2 = thisLabel;
+							}
+
+							if (!affinitiesByEdge.containsKey(e1))
+								affinitiesByEdge.put(e1, new TLongObjectHashMap<>());
+
+							final TLongObjectMap<TDoubleArrayList> allNeighborAffinities = computeIfAbsent(affinitiesByEdge, e1, emptyMapFactory);
+							final TDoubleArrayList neighborAffinities = computeIfAbsent(allNeighborAffinities, e2, emptyListFactory);
+
+							if (!Double.isNaN(thisAffinity))
+								neighborAffinities.add(thisAffinity);
+
+							if (!Double.isNaN(thatAffinity))
+								neighborAffinities.add(thatAffinity);
+
+						}
+
+						LOG.info("Edge affinities: {}", affinitiesByEdge);
+
+
+						affinitiesByEdge.forEachEntry((k, v) -> {
+							TLongObjectIterator<TDoubleArrayList> edgeIt = v.iterator();
+							while (edgeIt.hasNext()) {
+								edgeIt.advance();
+								double[] affinitiesSorted = edgeIt.value().toArray();
+								if (affinitiesSorted.length > 0) {
+									Arrays.sort(affinitiesSorted);
+									if (affinitiesSorted[affinitiesSorted.length / 2] > threshold) {
+										localUF.join(localUF.findRoot(k), localUF.findRoot(edgeIt.key()));
+									}
+								}
+							}
+							return true;
+						});
+
+					}
+
+					LOG.info("Returning mapping {}", mapping);
+					return new Tuple2<>(minMax, new Tuple2<>(mapping.keys(), mapping.values()));
+				})
+				.values()
+				.collect();
+
+		for (final Tuple2<long[], long[]> mapping : mappings) {
+			final long[] keys = mapping._1();
+			final long[] vals = mapping._2();
+			for (int index = 0; index < keys.length; ++index) {
+				final long k = keys[index];
+				final long v = vals[index];
+				final long r1 = uf.findRoot(k);
+				final long r2 = uf.findRoot(v);
+				if (r1 != r2) {
+					uf.join(r1, r2);
+					uf.findRoot(r1);
+					uf.findRoot(r2);
+				}
+
+			}
+		}
+
+		return uf;
+
+
+	}
+
 	private static <UF extends UnionFind> UF findOverlappingLabelsArgMaxNoHalo(
 			final JavaSparkContext sc,
 			final Supplier<? extends N5Reader> n5,
@@ -931,6 +1111,15 @@ public class SparkWatersheds {
 
 			return cache.get(l);
 		}
+	}
+
+	private static <T> T computeIfAbsent(final TLongObjectMap<T> map, final long key, final LongFunction<T> mappingFactory) {
+		final T value = map.get(key);
+		if (value != null)
+			return value;
+		final T t = mappingFactory.apply(key);
+		map.put(key, t);
+		return t;
 	}
 
 }
