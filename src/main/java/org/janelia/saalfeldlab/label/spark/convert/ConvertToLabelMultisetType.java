@@ -239,7 +239,8 @@ public class ConvertToLabelMultisetType
 
 	private static long[] computeGridOffset( final Interval source, final int[] blockSize )
 	{
-		final long[] gridOffset = new long[blockSize.length];
+		// FIXME: source and blockSize should have the same dimensionality, but this is not the case for cremi's annotations that are 1D datasets
+		final long[] gridOffset = new long[ Math.min( source.numDimensions(), blockSize.length ) ];
 		Arrays.setAll(gridOffset, d -> source.min(d) / blockSize[d]);
 		return gridOffset;
 	}
