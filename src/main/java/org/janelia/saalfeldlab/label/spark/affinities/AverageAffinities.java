@@ -277,8 +277,7 @@ public class AverageAffinities {
 
 						final DoubleType nan = new DoubleType(Double.NaN);
 
-						final StopWatch sw = new StopWatch();
-						sw.start();
+						final StopWatch sw = StopWatch.createAndStart();
 						while (source.hasNext()) {
 							final DoubleType s = source.next();
 							final boolean isInvalid = mask.next().valueEquals(zero);
