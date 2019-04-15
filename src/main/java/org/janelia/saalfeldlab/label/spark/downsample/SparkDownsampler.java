@@ -43,6 +43,8 @@ public class SparkDownsampler
 
 	private static final Logger LOG = LoggerFactory.getLogger( MethodHandles.lookup().lookupClass() );
 
+	private static final String LABEL_MULTISETTYPE_KEY = "isLabelMultiset";
+
 	private static final String DOWNSAMPLING_FACTORS_KEY = "downsamplingFactors";
 
 	private static final String MAX_NUM_ENTRIES_KEY = "maxNumEntries";
@@ -280,6 +282,7 @@ public class SparkDownsampler
 		writer.createDataset( outputDatasetName, downsampledDimensions, blockSize, DataType.UINT8, compression );
 		writer.setAttribute( outputDatasetName, DOWNSAMPLING_FACTORS_KEY, accumulatedDownsamplingFactor );
 		writer.setAttribute( outputDatasetName, MAX_NUM_ENTRIES_KEY, maxNumEntries );
+		writer.setAttribute( outputDatasetName, LABEL_MULTISETTYPE_KEY, true );
 
 		sc.parallelize( positions )
 				.map( new MinToInterval( max, blockSize ) )
