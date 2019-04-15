@@ -10,6 +10,7 @@ import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
+import org.janelia.saalfeldlab.n5.imglib2.N5LabelMultisetCacheLoader;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 
 import gnu.trove.set.hash.TLongHashSet;
@@ -20,7 +21,6 @@ import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.cell.Cell;
 import net.imglib2.img.cell.CellGrid;
 import net.imglib2.type.label.LabelMultisetType;
-import net.imglib2.type.label.N5CacheLoader;
 import net.imglib2.type.label.VolatileLabelMultisetArray;
 import net.imglib2.type.numeric.IntegerType;
 import net.imglib2.util.IntervalIndexer;
@@ -81,7 +81,7 @@ public class ExtractAndStoreLabelList implements Function< Tuple2< long[], long[
 		final RandomAccessibleInterval< I > img;
 		if ( isMultisetType )
 		{
-			final N5CacheLoader loader = new N5CacheLoader( n5reader, inputDataset );
+			final N5LabelMultisetCacheLoader loader = new N5LabelMultisetCacheLoader( n5reader, inputDataset );
 			final long[] cellGridPos = ExtractUniqueLabelsPerBlock.blockPos( Intervals.minAsLongArray( interval ), blockSize );
 			final Cell< VolatileLabelMultisetArray > array = loader.get( IntervalIndexer.positionToIndex( cellGridPos, grid.getGridDimensions() ) );
 			final ArrayImg< LabelMultisetType, VolatileLabelMultisetArray > arrayImg = new ArrayImg<>(

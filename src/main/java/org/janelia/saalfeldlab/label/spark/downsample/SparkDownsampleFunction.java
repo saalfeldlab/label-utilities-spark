@@ -10,6 +10,7 @@ import org.janelia.saalfeldlab.n5.N5FSReader;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
+import org.janelia.saalfeldlab.n5.imglib2.N5LabelMultisetCacheLoader;
 
 import net.imglib2.Interval;
 import net.imglib2.RandomAccess;
@@ -25,7 +26,6 @@ import net.imglib2.type.label.Label;
 import net.imglib2.type.label.LabelMultisetType;
 import net.imglib2.type.label.LabelMultisetType.Entry;
 import net.imglib2.type.label.LabelMultisetTypeDownscaler;
-import net.imglib2.type.label.N5CacheLoader;
 import net.imglib2.type.label.VolatileLabelMultisetArray;
 import net.imglib2.util.Intervals;
 import net.imglib2.util.Util;
@@ -86,7 +86,7 @@ public class SparkDownsampleFunction implements VoidFunction< Interval >
 		Arrays.setAll( blockSizeInSource, i -> blockMaxInSource[ i ] - blockMinInSource[ i ] + 1 );
 
 		final CachedCellImg< LabelMultisetType, VolatileLabelMultisetArray > source =
-				getSource( new N5CacheLoader( reader, inputDatasetName ), sourceDimensions, sourceBlockSize );
+				getSource( new N5LabelMultisetCacheLoader( reader, inputDatasetName ), sourceDimensions, sourceBlockSize );
 		final CellGrid sourceGrid = source.getCellGrid();
 		final int[] sourceCellDimensions = new int[ sourceGrid.numDimensions() ];
 		Arrays.setAll( sourceCellDimensions, sourceGrid::cellDimension );

@@ -4,7 +4,7 @@
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
-		<version>22.0.0</version>
+		<version>25.0.0</version>
 	</parent>
 
 	<groupId>org.janelia.saalfeldlab</groupId>
@@ -74,7 +74,6 @@
 
 
 	<properties>
-		<scijava.jvm.version>1.8</scijava.jvm.version>
 		<allowedDuplicateClasses>*</allowedDuplicateClasses>
 
 		<license.licenseName>bsd_2</license.licenseName>
@@ -82,8 +81,6 @@
 
 		<!-- NB: Deploy releases to the ImageJ Maven repository. -->
 		<releaseProfiles>deploy-to-imagej</releaseProfiles>
-
-		<imglib2-algorithm.version>0.11.1</imglib2-algorithm.version>
 	</properties>
 
 	<repositories>
@@ -107,7 +104,6 @@
 		<dependency>
 			<groupId>org.apache.spark</groupId>
 			<artifactId>spark-core_2.11</artifactId>
-			<version>2.4.0</version>
 		</dependency>
 		<dependency>
 			<groupId>net.imglib2</groupId>
@@ -125,26 +121,34 @@
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>n5</artifactId>
 			<version>2.0.2</version>
+
+			<!-- can be removed once new n5 is released -->
+			<exclusions>
+				<exclusion>
+					<groupId>net.jpountz.lz4</groupId>
+					<artifactId>lz4</artifactId>
+				</exclusion>
+			</exclusions>
+
 		</dependency>
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>n5-imglib2</artifactId>
-			<version>3.0.0</version>
+			<version>3.3.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>n5-hdf5</artifactId>
-			<version>1.0.2</version>
+			<version>1.0.3</version>
 		</dependency>
 		<dependency>
-			<groupId>org.janelia.saalfeldlab</groupId>
-			<artifactId>n5-label-multisets</artifactId>
-			<version>0.3.0</version>
+			<groupId>net.imglib2</groupId>
+			<artifactId>imglib2-label-multisets</artifactId>
+			<version>0.8.0</version>
 		</dependency>
 		<dependency>
 			<groupId>info.picocli</groupId>
 			<artifactId>picocli</artifactId>
-			<version>3.9.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.slf4j</groupId>
@@ -161,6 +165,18 @@
 			<groupId>junit</groupId>
 			<artifactId>junit</artifactId>
 			<scope>test</scope>
+		</dependency>
+
+		<!-- these can be removed once pom-scijava 26.0.0 is released -->
+		<dependency>
+			<groupId>org.slf4j</groupId>
+			<artifactId>jcl-over-slf4j</artifactId>
+			<version>1.7.25</version>
+		</dependency>
+		<dependency>
+			<groupId>org.slf4j</groupId>
+			<artifactId>slf4j-log4j12</artifactId>
+			<version>1.7.25</version>
 		</dependency>
 
 	</dependencies>
@@ -223,7 +239,6 @@
 				<dependency>
 					<groupId>org.apache.spark</groupId>
 					<artifactId>spark-core_2.11</artifactId>
-					<version>2.1.0</version>
 					<scope>provided</scope>
 				</dependency>
 			</dependencies>

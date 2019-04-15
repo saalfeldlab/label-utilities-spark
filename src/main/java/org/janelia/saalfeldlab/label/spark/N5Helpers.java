@@ -96,4 +96,99 @@ public class N5Helpers
 					Integer.parseInt( f2.replaceAll( "[^\\d]", "" ) ) );
 		} );
 	}
+
+	public static < T > T revertInplaceAndReturn( final T t, final boolean revert )
+	{
+		if ( !revert ) { return t; }
+
+		if ( t instanceof boolean[] )
+		{
+			final boolean[] arr = ( boolean[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final boolean v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof byte[] )
+		{
+			final byte[] arr = ( byte[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final byte v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof char[] )
+		{
+			final char[] arr = ( char[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final char v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof short[] )
+		{
+			final short[] arr = ( short[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final short v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof int[] )
+		{
+			final int[] arr = ( int[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final int v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof long[] )
+		{
+			final long[] arr = ( long[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final long v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof float[] )
+		{
+			final float[] arr = ( float[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final float v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		if ( t instanceof double[] )
+		{
+			final double[] arr = ( double[] ) t;
+			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
+			{
+				final double v = arr[ 0 ];
+				arr[ 0 ] = arr[ k ];
+				arr[ k ] = v;
+			}
+		}
+
+		return t;
+	}
 }

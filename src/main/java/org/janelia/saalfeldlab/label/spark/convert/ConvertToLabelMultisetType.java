@@ -3,31 +3,26 @@ package org.janelia.saalfeldlab.label.spark.convert;
 import java.io.IOException;
 import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.Callable;
-import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.apache.commons.lang.time.DurationFormatUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
-import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
 import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.CompressionAdapter;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.GzipCompression;
-import org.janelia.saalfeldlab.n5.N5FSReader;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
-import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Reader;
-import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
+import org.janelia.saalfeldlab.n5.imglib2.N5LabelMultisets;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,16 +30,21 @@ import org.slf4j.LoggerFactory;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
+import net.imglib2.FinalInterval;
+import net.imglib2.Interval;
 import net.imglib2.RandomAccessibleInterval;
+import net.imglib2.algorithm.util.Grids;
+import net.imglib2.converter.Converters;
 import net.imglib2.type.NativeType;
+import net.imglib2.type.label.FromIntegerTypeConverter;
 import net.imglib2.type.label.LabelMultisetType;
-import net.imglib2.type.label.LabelUtils;
 import net.imglib2.type.numeric.IntegerType;
 import net.imglib2.util.Intervals;
 import net.imglib2.view.Views;
 import picocli.CommandLine;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
+import scala.Tuple2;
 
 public class ConvertToLabelMultisetType
 {
@@ -64,6 +64,8 @@ public class ConvertToLabelMultisetType
 	public static final String MAX_ID_KEY = N5Helpers.MAX_ID_KEY;
 
 	public static final int DEFAULT_BLOCK_SIZE = 64;
+
+	public static final int MAX_PARTITIONS = 1000;
 
 	// TODO make this parallizable/spark and not hdf-to-n5 but convert between
 	// various instances of n5 instead
@@ -106,7 +108,7 @@ public class ConvertToLabelMultisetType
 																	// compressionType,
 																	// Compression.class
 																	// );
-			final int nDim = n5Reader( this.inputN5 ).getDatasetAttributes( this.inputDataset ).getNumDimensions();
+			final int nDim = N5Helpers.n5Reader( this.inputN5 ).getDatasetAttributes( this.inputDataset ).getNumDimensions();
 			final int[] blockSize = this.blockSize.length < nDim ? IntStream.generate( () -> this.blockSize[ 0 ] ).limit( nDim ).toArray() : this.blockSize;
 
 			final long startTime = System.currentTimeMillis();
@@ -160,7 +162,8 @@ public class ConvertToLabelMultisetType
 			final Compression compression,
 			final boolean revert ) throws IOException
 	{
-		final N5Reader reader = n5Reader( inputGroup, blockSize );
+		final N5Reader reader = N5Helpers.n5Reader( inputGroup, blockSize );
+		final int[] inputBlockSize = reader.getDatasetAttributes( inputDataset ).getBlockSize();
 		final RandomAccessibleInterval< I > img = N5Utils.open( reader, inputDataset );
 		final Map< String, Class< ? > > attributeNames = reader.listAttributes( inputDataset );
 		Arrays.asList(
@@ -176,194 +179,78 @@ public class ConvertToLabelMultisetType
 		final long[] dimensions = new long[ nDim ];
 		img.dimensions( dimensions );
 
-		final N5Writer writer = n5Writer( outputGroupName, blockSize );
+		final N5Writer writer = N5Helpers.n5Writer( outputGroupName, blockSize );
 		writer.createDataset( outputDatasetName, dimensions, blockSize, DataType.UINT8, compression );
 		writer.setAttribute( outputDatasetName, LABEL_MULTISETTYPE_KEY, true );
 		for ( final Entry< String, Class< ? > > entry : attributeNames.entrySet() )
+			writer.setAttribute( outputDatasetName, entry.getKey(), N5Helpers.revertInplaceAndReturn( reader.getAttribute( inputDataset, entry.getKey(), entry.getValue() ), revert ) );
+
+		final int[] parallelizeBlockSize = new int[ blockSize.length ];
+		if ( Intervals.numElements( blockSize ) >= Intervals.numElements( inputBlockSize ) )
 		{
-			writer.setAttribute( outputDatasetName, entry.getKey(), revertInplaceAndReturn( reader.getAttribute( inputDataset, entry.getKey(), entry.getValue() ), revert ) );
+			Arrays.setAll( parallelizeBlockSize, d -> blockSize[ d ] );
+			LOG.debug( "Output block size {} is the same or bigger than the input block size {}, parallelizing over output blocks of size {}", blockSize, inputBlockSize, parallelizeBlockSize );
+		}
+		else
+		{
+			Arrays.setAll( parallelizeBlockSize, d -> ( int ) Math.max( Math.round( ( double ) inputBlockSize[ d ] / blockSize[ d ] ), 1 ) * blockSize[ d ] );
+			LOG.debug( "Output block size {} is smaller than the input block size {}, parallelizing over adjusted input blocks of size {}", blockSize, inputBlockSize, parallelizeBlockSize );
 		}
 
-		final List< long[] > offsets = new ArrayList<>();
-
-		final long[] min = new long[ nDim ];
-
-		for ( int dim = 0; dim < nDim; )
-		{
-
-			offsets.add( min.clone() );
-
-			for ( dim = 0; dim < nDim; dim++ )
-			{
-				min[ dim ] += blockSize[ dim ];
-				if ( min[ dim ] < dimensions[ dim ] )
-				{
-					break;
-				}
-				else
-				{
-					min[ dim ] = 0;
-				}
-			}
-		}
-
-		// required to serialize compression as json string
-		final Gson gson = new GsonBuilder()
-				.registerTypeHierarchyAdapter( Compression.class, CompressionAdapter.getJsonAdapter() )
-				.create();
+		final List< Tuple2< long[], long[] > > intervals = Grids.collectAllContainedIntervals( dimensions, parallelizeBlockSize )
+				.stream()
+				.map( interval -> new Tuple2<>( Intervals.minAsLongArray( interval ), Intervals.maxAsLongArray( interval ) ) )
+				.collect( Collectors.toList() );
 
 		final long maxId = sc
-				.parallelize( offsets )
-				.map( new ToInterval( dimensions, blockSize ) )
-				.map( new ReadIntegerData< I >( inputGroup, inputDataset, blockSize ) )
-				.map( new ConvertToLabelMultisetTypeFunction<>() )
-				.mapToPair( new AttachBlockPosition( blockSize ) )
-				.mapToPair( new ConvertToDataBlock() )
-				.map( new WriteBlock<>( outputGroupName, outputDatasetName, dimensions, blockSize, DataType.UINT8, gson.toJson( compression ) ) )
+				.parallelize( intervals, Math.min( intervals.size(), MAX_PARTITIONS ) )
+				.map( intervalMinMax -> {
+					final Interval interval = new FinalInterval( intervalMinMax._1(), intervalMinMax._2() );
+
+					@SuppressWarnings("unchecked")
+					final RandomAccessibleInterval< I > blockImg = Views.interval(
+							( RandomAccessibleInterval< I > ) N5Utils.open( N5Helpers.n5Reader( inputGroup, blockSize ), inputDataset ),
+							interval
+						);
+
+					final FromIntegerTypeConverter< I > converter = new FromIntegerTypeConverter<>();
+					final LabelMultisetType type = FromIntegerTypeConverter.getAppropriateType();
+					long blockMaxId = Long.MIN_VALUE;
+					for ( final I i : Views.iterable( blockImg ) )
+					{
+						final long il = i.getIntegerLong();
+						blockMaxId = Math.max( il, blockMaxId );
+					}
+					final RandomAccessibleInterval< LabelMultisetType > converted = Converters.convert( blockImg, converter, type );
+
+					N5LabelMultisets.saveLabelMultisetBlock(
+							converted,
+							N5Helpers.n5Writer( outputGroupName, blockSize ),
+							outputDatasetName,
+							computeGridOffset( interval, blockSize ) // TODO: this parameter can be omitted with next release of n5-imglib2
+						);
+
+					return blockMaxId;
+				} )
 				.max( new LongComparator() );
+
 		writer.setAttribute( outputDatasetName, MAX_ID_KEY, maxId );
-
 	}
 
-	public static N5Reader n5Reader( final String base, final int... defaultCellDimensions ) throws IOException
+	private static long[] computeGridOffset( final Interval source, final int[] blockSize )
 	{
-		return isHDF( base ) ? new N5HDF5Reader( base, defaultCellDimensions ) : new N5FSReader( base );
-	}
-
-	public static N5Writer n5Writer( final String base, final int... defaultCellDimensions ) throws IOException
-	{
-		return isHDF( base ) ? new N5HDF5Writer( base, defaultCellDimensions ) : new N5FSWriter( base );
-	}
-
-	public static boolean isHDF( final String base )
-	{
-		LOG.debug( "Checking {} for HDF", base );
-		final boolean isHDF = Pattern.matches( "^h5://", base ) || Pattern.matches( "^.*\\.(hdf|h5)$", base );
-		LOG.debug( "{} is hdf5? {}", base, isHDF );
-		return isHDF;
-	}
-
-	public static ByteArrayDataBlock toDataBlock(
-			final RandomAccessibleInterval< LabelMultisetType > multisets,
-			final long[] cellOffset )
-	{
-		return new ByteArrayDataBlock(
-				Intervals.dimensionsAsIntArray( multisets ),
-				cellOffset,
-				LabelUtils.serializeLabelMultisetTypes( Views.flatIterable( multisets ),
-						( int ) Intervals.numElements( multisets ) ) );
-	}
-
-	public static long[] blockPos( final long[] position, final int[] blockSize )
-	{
-		final long[] blockPos = new long[ position.length ];
-		Arrays.setAll( blockPos, d -> position[ d ] / blockSize[ d ] );
-		return blockPos;
-	}
-
-	public static < T > T revertInplaceAndReturn( final T t, final boolean revert )
-	{
-		if ( !revert ) { return t; }
-
-		if ( t instanceof boolean[] )
-		{
-			final boolean[] arr = ( boolean[] ) t;
-			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
-			{
-				final boolean v = arr[ 0 ];
-				arr[ 0 ] = arr[ k ];
-				arr[ k ] = v;
-			}
-		}
-
-		if ( t instanceof byte[] )
-		{
-			final byte[] arr = ( byte[] ) t;
-			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
-			{
-				final byte v = arr[ 0 ];
-				arr[ 0 ] = arr[ k ];
-				arr[ k ] = v;
-			}
-		}
-
-		if ( t instanceof char[] )
-		{
-			final char[] arr = ( char[] ) t;
-			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
-			{
-				final char v = arr[ 0 ];
-				arr[ 0 ] = arr[ k ];
-				arr[ k ] = v;
-			}
-		}
-
-		if ( t instanceof short[] )
-		{
-			final short[] arr = ( short[] ) t;
-			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
-			{
-				final short v = arr[ 0 ];
-				arr[ 0 ] = arr[ k ];
-				arr[ k ] = v;
-			}
-		}
-
-		if ( t instanceof int[] )
-		{
-			final int[] arr = ( int[] ) t;
-			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
-			{
-				final int v = arr[ 0 ];
-				arr[ 0 ] = arr[ k ];
-				arr[ k ] = v;
-			}
-		}
-
-		if ( t instanceof long[] )
-		{
-			final long[] arr = ( long[] ) t;
-			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
-			{
-				final long v = arr[ 0 ];
-				arr[ 0 ] = arr[ k ];
-				arr[ k ] = v;
-			}
-		}
-
-		if ( t instanceof float[] )
-		{
-			final float[] arr = ( float[] ) t;
-			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
-			{
-				final float v = arr[ 0 ];
-				arr[ 0 ] = arr[ k ];
-				arr[ k ] = v;
-			}
-		}
-
-		if ( t instanceof double[] )
-		{
-			final double[] arr = ( double[] ) t;
-			for ( int i = 0, k = arr.length - 1; i < arr.length / 2; ++i, --k )
-			{
-				final double v = arr[ 0 ];
-				arr[ 0 ] = arr[ k ];
-				arr[ k ] = v;
-			}
-		}
-
-		return t;
+		// FIXME: source and blockSize should have the same dimensionality, but this is not the case for cremi's annotations that are 1D datasets
+		final long[] gridOffset = new long[ Math.min( source.numDimensions(), blockSize.length ) ];
+		Arrays.setAll(gridOffset, d -> source.min(d) / blockSize[d]);
+		return gridOffset;
 	}
 
 	private static final class LongComparator implements Comparator< Long >, Serializable
 	{
-
 		@Override
 		public int compare( final Long o1, final Long o2 )
 		{
 			return Long.compare( o1, o2 );
 		}
-
 	}
 }
