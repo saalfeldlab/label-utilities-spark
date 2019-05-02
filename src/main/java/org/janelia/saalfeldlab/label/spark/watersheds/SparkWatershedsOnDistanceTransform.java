@@ -305,7 +305,7 @@ public class SparkWatershedsOnDistanceTransform {
 					// we would like to have
 					List<Point> seeds = LocalExtrema
 							.findLocalExtrema(
-									Views.extendValue(relief, new DoubleType(Double.MIN_VALUE)),
+									Converters.convert(Views.extendValue(relief, new DoubleType(Double.MIN_VALUE)), (src, tgt) -> tgt.setReal(Double.isNaN(src.getRealDouble()) ? Double.MIN_VALUE : src.getRealDouble()), new DoubleType()),
 									relief,
 									new LocalExtrema.MaximumCheck<>(new DoubleType(minimumDistanceFromBoundary)));
 					LOG.debug("Got {} seeds", seeds.size());
