@@ -160,6 +160,10 @@ public class SparkWatershedsOnDistanceTransform {
 		Double mergeFragmentThreshold = Double.NEGATIVE_INFINITY;
 
 		@Expose
+		@CommandLine.Option(names = "--minimum-seed-distance-from-boundary", paramLabel = "SEED_DISTANCE", description = "Only extract seeds for watershed that are at least SEED_DISTANCE away from boundary (Distance transform takes into account resolution of dataset).", defaultValue = "0.0")
+		Double seedDistance;
+
+		@Expose
 		@CommandLine.Option(names = "--relabel", paramLabel = "RELABEL", description = "Relabel all label data sets for unique labels", defaultValue = "false")
 		Boolean relabel;
 
@@ -223,8 +227,6 @@ public class SparkWatershedsOnDistanceTransform {
 		final double[] offset = reverted(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]), args.revertArrayAttributes);
 		attributes.put(RESOLUTION_KEY, resolution);
 		attributes.put(OFFSET_KEY, offset);
-		final double[] ratios = DoubleStream.of(resolution).map(r -> r / DoubleStream.of(resolution).min().getAsDouble()).toArray();
-		final double[] ratiosSquared = DoubleStream.of(ratios).map(r -> r * 2.0).toArray();
 
 		final Map<String, DatasetAttributes> datasets = new HashMap<>();
 		Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT64, new GzipCompression())));
@@ -245,9 +247,9 @@ public class SparkWatershedsOnDistanceTransform {
 					n5in,
 					n5out,
 					outputDims,
-					DoubleStream.of(resolution).map(d -> d * d).toArray(),
+					DoubleStream.of(resolution).map(d -> d * d).toArray(), // TODO maybe pass these as parameters through CLI instead?
 					args.affinityThresholdDistanceTransform,
-					200.0,
+					args.seedDistance,
 //					new SerializableMergeWatershedsMinThresholdSupplier(args.threshold),
 					new SerializableMergeWatershedsMedianThresholdSupplier(args.mergeFragmentThreshold),
 					args.mergeFragmentThreshold,
@@ -305,7 +307,7 @@ public class SparkWatershedsOnDistanceTransform {
 					// we would like to have
 					List<Point> seeds = LocalExtrema
 							.findLocalExtrema(
-									Converters.convert(Views.extendValue(relief, new DoubleType(Double.MIN_VALUE)), (src, tgt) -> tgt.setReal(Double.isNaN(src.getRealDouble()) ? Double.MIN_VALUE : src.getRealDouble()), new DoubleType()),
+									Converters.convert(Views.extendValue(relief, new DoubleType(Double.NEGATIVE_INFINITY)), (src, tgt) -> tgt.setReal(Double.isNaN(src.getRealDouble()) ? Double.MIN_VALUE : src.getRealDouble()), new DoubleType()),
 									relief,
 									new LocalExtrema.MaximumCheck<>(new DoubleType(minimumDistanceFromBoundary)));
 					LOG.debug("Got {} seeds", seeds.size());
