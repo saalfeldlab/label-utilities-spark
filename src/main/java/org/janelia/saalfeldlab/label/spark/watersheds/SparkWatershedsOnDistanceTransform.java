@@ -298,7 +298,8 @@ public class SparkWatershedsOnDistanceTransform {
 				.mapToPair(new CropAffinitiesToDistanceTransform(n5in, averagedAffinities, threshold, distanceTransformWeights))
 				.mapToPair(t -> {
 					final Interval block = t._1();
-					final RandomAccessibleInterval<DoubleType> relief = Views.zeroMin(t._2());
+					final RandomAccessibleInterval<DoubleType> relief = Views.zeroMin(t._2()._2());
+					final RandomAccessibleInterval<FloatType> affs = Views.zeroMin(t._2()._1());
 					// we expect that there are no NaNs in the relief. Replace NaNs with Double.NEGATIVE_INFINITY as appropriate
 					// Any point that is surrounded entirely by NaN will be added as seed point by default. This is not the behavior
 					// we would like to have
@@ -338,12 +339,12 @@ public class SparkWatershedsOnDistanceTransform {
 							Views.extendValue(relief, new DoubleType(Double.NaN)),
 							labels,
 							seeds,
-							(value, ref) -> -value.getRealDouble(),
+							(value, ref) -> value.getRealDouble() == 0 ? Double.NaN : -value.getRealDouble(),
 							new DiamondShape(1));
 
 					N5Utils.saveBlock(labels, n5out.get(), seededWatersheds, attributes.apply(DataType.UINT64), blockOffset);
 
-					final LongUnaryOperator mapping = mergeWatershedregions.get().getMapping(relief, labels, seeds.size() + 1);
+					final LongUnaryOperator mapping = mergeWatershedregions.get().getMapping(affs, labels, seeds.size() + 1);
 
 					// TODO find better logic instead of label == 0 check
 					final TLongSet ids = new TLongHashSet();
@@ -761,7 +762,8 @@ public class SparkWatershedsOnDistanceTransform {
 										"Found same label {} in slices {} and {} for dimension {}",
 										thisLabel,
 										thisSliceIndex,
-										thatSliceIndex);
+										thatSliceIndex,
+										dim);
 								throw new RuntimeException("Got the same label in two different blocks -- impossible: " + thisLabel);
 							}
 
@@ -907,7 +909,8 @@ public class SparkWatershedsOnDistanceTransform {
 										"Found same label {} in slices {} and {} for dimension {}",
 										thisLabel,
 										thisSliceIndex,
-										thatSliceIndex);
+										thatSliceIndex,
+										dim);
 								throw new RuntimeException("Got the same label in two different blocks -- impossible: " + thisLabel);
 							}
 
@@ -972,7 +975,7 @@ public class SparkWatershedsOnDistanceTransform {
 
 	}
 
-	private static class CropAffinitiesToDistanceTransform implements PairFunction<Interval, Interval, RandomAccessibleInterval<DoubleType>> {
+	private static class CropAffinitiesToDistanceTransform implements PairFunction<Interval, Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<DoubleType>>> {
 
 		private final Supplier<? extends N5Reader> n5in;
 
@@ -994,7 +997,7 @@ public class SparkWatershedsOnDistanceTransform {
 		}
 
 		@Override
-		public Tuple2<Interval, RandomAccessibleInterval<DoubleType>> call(final Interval interval) throws Exception {
+		public Tuple2<Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<DoubleType>>> call(final Interval interval) throws Exception {
 			final RandomAccessibleInterval<FloatType> affsImg = N5Utils.open(n5in.get(), affinities);
 			final RandomAccessible<FloatType> affs = Views.extendValue(affsImg, new FloatType(Float.NaN));
 			final long[] min = Intervals.minAsLongArray(interval);
@@ -1002,6 +1005,8 @@ public class SparkWatershedsOnDistanceTransform {
 			// TODO expose border as parameter
 			final Interval withContext = Intervals.expand(interval, 32, 32, 32);
 			final RandomAccessibleInterval<DoubleType> distanceTransform = ArrayImgs.doubles(Intervals.dimensionsAsLongArray(withContext));
+			final RandomAccessibleInterval<FloatType> affsCrop = ArrayImgs.floats(Intervals.dimensionsAsLongArray(interval));
+			LoopBuilder.setImages(affsCrop, Views.interval(affsImg, interval)).forEachPixel(FloatType::set);
 			// have to use ! here because of possible NaN values
 			LOG.debug("Threshold is {}", threshold);
 			DistanceTransform.binaryTransform(
@@ -1012,7 +1017,7 @@ public class SparkWatershedsOnDistanceTransform {
 			// TODO should we actually rewrite those?
 			double[] minMax = new double[] {Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
 			LoopBuilder
-					.setImages(Views.interval(affsImg, interval), Views.interval(Views.translate(distanceTransform, min), interval))
+					.setImages(Views.interval(affs, withContext), distanceTransform)
 					.forEachPixel((a, d) -> {
 						if (Float.isNaN(a.getRealFloat()))
 							d.setReal(Double.NaN);
@@ -1026,7 +1031,7 @@ public class SparkWatershedsOnDistanceTransform {
 						}
 					});
 			LOG.debug("min max = {}", minMax);
-			return new Tuple2<>(interval, Views.interval(Views.translate(distanceTransform, Intervals.minAsLongArray(withContext)), interval));
+			return new Tuple2<>(interval, new Tuple2<>(Views.translate(affsCrop, Intervals.minAsLongArray(interval)), Views.interval(Views.translate(distanceTransform, Intervals.minAsLongArray(withContext)), interval)));
 		}
 	}
 
