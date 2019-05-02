@@ -1,13 +1,12 @@
 package org.janelia.saalfeldlab.label.spark.watersheds;
 
 import gnu.trove.list.array.TDoubleArrayList;
-import gnu.trove.list.array.TFloatArrayList;
 import gnu.trove.map.TLongObjectMap;
-import gnu.trove.map.hash.TLongLongHashMap;
 import gnu.trove.map.hash.TLongObjectHashMap;
 import net.imglib2.Cursor;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.unionfind.IntArrayUnionFind;
+import net.imglib2.type.numeric.RealType;
 import net.imglib2.type.numeric.integer.UnsignedLongType;
 import net.imglib2.type.numeric.real.FloatType;
 import net.imglib2.util.Intervals;
@@ -28,8 +27,8 @@ class SerializableMergeWatershedsMedianThresholdSupplier implements Supplier<Mer
 	private final class MW implements MergeWatersheds, Serializable {
 
 		@Override
-		public LongUnaryOperator getMapping(
-				final RandomAccessibleInterval<FloatType> relief,
+		public <T extends RealType<T>> LongUnaryOperator getMapping(
+				final RandomAccessibleInterval<T> relief,
 				final RandomAccessibleInterval<UnsignedLongType> labels,
 				final long maxId) {
 
@@ -42,8 +41,8 @@ class SerializableMergeWatershedsMedianThresholdSupplier implements Supplier<Mer
 				final long[] max2 = max1.clone();
 				max1[d] -= 1;
 				min2[d] += 1;
-				final Cursor<FloatType> reliefCursor1 = Views.flatIterable(Views.interval(relief, min1, max1)).cursor();
-				final Cursor<FloatType> reliefCursor2 = Views.flatIterable(Views.interval(relief, min2, max2)).cursor();
+				final Cursor<T> reliefCursor1 = Views.flatIterable(Views.interval(relief, min1, max1)).cursor();
+				final Cursor<T> reliefCursor2 = Views.flatIterable(Views.interval(relief, min2, max2)).cursor();
 				final Cursor<UnsignedLongType> labelsCursor1 = Views.flatIterable(Views.interval(labels, min1, max1)).cursor();
 				final Cursor<UnsignedLongType> labelsCursor2 = Views.flatIterable(Views.interval(labels, min2, max2)).cursor();
 				while (reliefCursor1.hasNext()) {
