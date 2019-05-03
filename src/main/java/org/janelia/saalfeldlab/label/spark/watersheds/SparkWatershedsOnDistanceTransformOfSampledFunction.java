@@ -247,7 +247,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 					n5in,
 					n5out,
 					outputDims,
-					DoubleStream.of(resolution).map(d -> args.weightDistanceTransform * d / DoubleStream.of(resolution).min().getAsDouble()).toArray(), // TODO maybe pass these as parameters through CLI instead?
+					DoubleStream.of(resolution).map(d -> d / DoubleStream.of(resolution).min().getAsDouble()).map(d -> args.weightDistanceTransform * d * d).toArray(), // TODO maybe pass these as parameters through CLI instead?
 					args.seedDistance,
 //					new SerializableMergeWatershedsMinThresholdSupplier(args.threshold),
 					new SerializableMergeWatershedsMedianThresholdSupplier(args.mergeFragmentThreshold),
