@@ -991,10 +991,26 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			this.weights = weights;
 		}
 
+		private static class ReplaceNaNWith<T extends RealType<T>> implements Converter<T, T> {
+
+			private final double replacement;
+
+			private ReplaceNaNWith(double replacement) {
+				this.replacement = replacement;
+			}
+
+			@Override
+			public void convert(T src, T tgt) {
+				final double t = src.getRealDouble();
+				tgt.setReal(Double.isNaN(t) ? replacement : t);
+			}
+		}
+
 		@Override
 		public Tuple2<Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<DoubleType>>> call(final Interval interval) throws Exception {
 			final RandomAccessibleInterval<FloatType> affsImg = N5Utils.open(n5in.get(), affinities);
-			final RandomAccessible<FloatType> affs = Views.extendValue(affsImg, new FloatType(Float.NaN));
+
+			final RandomAccessible<FloatType> affs = Converters.convert(Views.extendValue(affsImg, new FloatType(0.0f)), new ReplaceNaNWith<>(0.0), new FloatType());
 			final long[] min = Intervals.minAsLongArray(interval);
 
 			// TODO expose border as parameter
@@ -1004,16 +1020,11 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			LoopBuilder.setImages(affsCrop, Views.interval(affsImg, interval)).forEachPixel(FloatType::set);
 			// have to use ! here because of possible NaN values
 			DistanceTransform.transform(
-					Views.zeroMin(Views.interval(affs, withContext)),
+					Views.zeroMin(Views.interval(Converters.convert(affs, (src, tgt) -> tgt.setReal(src.getRealDouble() * src.getRealDouble()), new DoubleType()), withContext)),
 					distanceTransform,
 					DistanceTransform.DISTANCE_TYPE.EUCLIDIAN,
 					weights
 			);
-//			DistanceTransform.binaryTransform(
-//					Views.zeroMin(Views.interval(Converters.convert(affs, (s, t) -> t.set(!(s.getRealDouble() >= threshold)), new BitType()), withContext)),
-//					distanceTransform,
-//					DistanceTransform.DISTANCE_TYPE.EUCLIDIAN,
-//					weights);
 			// TODO should we actually rewrite those?
 			double[] minMax = new double[] {Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
 			LoopBuilder
