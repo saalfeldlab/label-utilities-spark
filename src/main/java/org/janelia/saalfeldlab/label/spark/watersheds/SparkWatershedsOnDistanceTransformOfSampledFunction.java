@@ -27,6 +27,7 @@ import net.imglib2.algorithm.neighborhood.DiamondShape;
 import net.imglib2.algorithm.util.Grids;
 import net.imglib2.algorithm.util.unionfind.LongHashMapUnionFind;
 import net.imglib2.algorithm.util.unionfind.UnionFind;
+import net.imglib2.converter.Converter;
 import net.imglib2.converter.Converters;
 import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgFactory;
@@ -304,7 +305,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 					// we would like to have
 					List<Point> seeds = LocalExtrema
 							.findLocalExtrema(
-									Converters.convert(Views.extendValue(relief, new DoubleType(Double.NEGATIVE_INFINITY)), (src, tgt) -> tgt.setReal(Double.isNaN(src.getRealDouble()) ? Double.MIN_VALUE : src.getRealDouble()), new DoubleType()),
+									Converters.convert(Views.extendValue(relief, new DoubleType(0.0)), (src, tgt) -> tgt.setReal(Double.isNaN(src.getRealDouble()) ? 0.0 : src.getRealDouble()), new DoubleType()),
 									relief,
 									new LocalExtrema.MaximumCheck<>(new DoubleType(minimumDistanceFromBoundary)));
 					LOG.debug("Got {} seeds", seeds.size());
