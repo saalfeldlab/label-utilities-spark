@@ -320,6 +320,7 @@ public class AverageAffinities {
 					}
 
 					// TODO combine the three loops into a single loop. Probably not that much overhead, though
+					// TODO only write out ROI of mask. Outside doesn't exist anyway!
 					final double factor = 0.5 / enumeratedOffsets.length;
 					Views.iterable(slice1).forEach(px -> px.mul(factor));
 
