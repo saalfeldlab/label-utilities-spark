@@ -6,11 +6,11 @@ import net.imglib2.FinalRealInterval;
 import net.imglib2.Interval;
 import net.imglib2.RandomAccessible;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.converter.Converters;
 import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgs;
 import net.imglib2.img.basictypeaccess.array.ByteArray;
-import net.imglib2.realtransform.Scale;
-import net.imglib2.type.NativeType;
+import net.imglib2.realtransform.AffineTransform3D;
 import net.imglib2.type.numeric.integer.UnsignedByteType;
 import net.imglib2.util.ConstantUtils;
 import net.imglib2.util.Intervals;
@@ -86,6 +86,14 @@ public class MakePredictionMask {
 		double[] outputResolution;
 
 		@Expose
+		@CommandLine.Option(names = "--input-offset", paramLabel = "INPUT_OFFSET", defaultValue = "0,0,0", split = ",")
+		double[] inputOffset;
+
+		@Expose
+		@CommandLine.Option(names = "--output-offset", paramLabel = "OUTPUT_OFFSET", defaultValue = "0,0,0", split = ",")
+		double[] outputOffset;
+
+		@Expose
 		@CommandLine.Option(names = "--network-input-size", paramLabel = "INPUT_SIZE", split = ",", description = "World coordinates", defaultValue = "15480,15480,15480")//"31032,31032,32760")
 		double[] networkInputSizeWorld;
 
@@ -125,6 +133,14 @@ public class MakePredictionMask {
 
 			if (inputDataset != null)
 				inputDatasetSize = new N5FSReader(inputContainer).getDatasetAttributes(inputDataset).getDimensions();
+
+			for (int d = 0; d < inputOffset.length; ++d)
+				if (inputOffset[d] / inputResolution[d] != (int) (inputOffset[d] / inputResolution[d]))
+					throw new Exception("Offset not integer multiple of resolution!");
+
+			for (int d = 0; d < outputOffset.length; ++d)
+				if (outputOffset[d] / outputResolution[d] != (int) (outputOffset[d] / outputResolution[d]))
+					throw new Exception("Offset not integer multiple of resolution!");
 
 
 
@@ -207,6 +223,7 @@ public class MakePredictionMask {
 		n5out.get().createDataset(args.maskDataset, outputDatasetSize, args.blockSize(), DataType.UINT8, new GzipCompression());
 		n5out.get().setAttribute(args.maskDataset, NETWORK_SIZE_DIFF_KEY, networkSizeDiff);
 		n5out.get().setAttribute(args.maskDataset, "resolution", args.outputResolution);
+		n5out.get().setAttribute(args.maskDataset, "offset", args.outputOffset);
 		n5out.get().setAttribute(args.maskDataset, "min", 0);
 		n5out.get().setAttribute(args.maskDataset, "max", 1);
 		n5out.get().setAttribute(args.maskDataset, "value_range", new double[] {0, 1});
@@ -216,6 +233,8 @@ public class MakePredictionMask {
 				args.maskDataset,
 				args.inputResolution,
 				args.outputResolution,
+				args.inputOffset,
+				args.outputOffset,
 				networkSizeDiffHalfWorld,
 				args.inputMaskSupplier(),
 				outputDatasetSize,
@@ -228,6 +247,8 @@ public class MakePredictionMask {
 			final String maskDataset,
 			final double[] inputVoxelSize,
 			final double[] outputVoxelSize,
+			final double[] inputOffset,
+			final double[] outputOffset,
 			final double[] paddingInWorldCoordinates,
 			final Supplier<RandomAccessible<UnsignedByteType>> inputMask,
 			final long[] outputDatasetSize,
@@ -249,14 +270,24 @@ public class MakePredictionMask {
 						final DatasetAttributes attributes = new DatasetAttributes(outputDatasetSize, blockSize, DataType.UINT8, new GzipCompression());
 						final double[] minReal = LongStream.of(min).asDoubleStream().toArray();
 						final double[] maxReal = LongStream.of(max).asDoubleStream().toArray();
-						final Scale outputScale = new Scale(outputVoxelSize);
-						final Scale inputScale = new Scale(inputVoxelSize);
-						outputScale.apply(minReal, minReal);
-						outputScale.apply(maxReal, maxReal);
+//						final Scale outputScale = new Scale(outputVoxelSize);
+//						final Scale inputScale = new Scale(inputVoxelSize);
+						final AffineTransform3D outputTransform = new AffineTransform3D();
+						outputTransform.set(outputVoxelSize[0], 0, 0);
+						outputTransform.set(outputVoxelSize[1], 1, 1);
+						outputTransform.set(outputVoxelSize[2], 2, 2);
+						outputTransform.setTranslation(outputOffset);
+						final AffineTransform3D inputTransform = new AffineTransform3D();
+						inputTransform.set(inputVoxelSize[0], 0, 0);
+						inputTransform.set(inputVoxelSize[1], 1, 1);
+						inputTransform.set(inputVoxelSize[2], 2, 2);
+						inputTransform.setTranslation(inputOffset);
+						outputTransform.apply(minReal, minReal);
+						outputTransform.apply(maxReal, maxReal);
 						Arrays.setAll(minReal, d -> minReal[d] - paddingInWorldCoordinates[d]);
 						Arrays.setAll(maxReal, d -> maxReal[d] + paddingInWorldCoordinates[d]);
-						inputScale.applyInverse(minReal, minReal);
-						inputScale.applyInverse(maxReal, maxReal);
+						inputTransform.applyInverse(minReal, minReal);
+						inputTransform.applyInverse(maxReal, maxReal);
 						boolean isForeground = true;
 						final IntervalView<UnsignedByteType> inputInterval = Views.interval(mask, Intervals.smallestContainingInterval(new FinalRealInterval(minReal, maxReal)));
 						LOG.debug("Checking interval ({} {}) for block ({} {})", Intervals.minAsLongArray(inputInterval), Intervals.maxAsLongArray(inputInterval), min, max);
@@ -358,7 +389,7 @@ public class MakePredictionMask {
 		@Override
 		public RandomAccessible<UnsignedByteType> get() {
 			try {
-				return Views.extendValue(N5Utils.open(n5.get(), dataset), new UnsignedByteType(0));
+				return Views.extendValue(Converters.convert(N5Utils.<UnsignedByteType>open(n5.get(), dataset), (s, t) -> t.setInteger(s.getIntegerLong()), new UnsignedByteType()), new UnsignedByteType(0));
 			} catch (IOException e) {
 				throw new RuntimeException(e);
 			}
