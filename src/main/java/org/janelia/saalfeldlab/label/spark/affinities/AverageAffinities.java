@@ -12,6 +12,7 @@ import net.imglib2.converter.RealDoubleConverter;
 import net.imglib2.converter.RealFloatConverter;
 import net.imglib2.img.array.ArrayImgs;
 import net.imglib2.type.NativeType;
+import net.imglib2.type.numeric.IntegerType;
 import net.imglib2.type.numeric.RealType;
 import net.imglib2.type.numeric.integer.UnsignedByteType;
 import net.imglib2.type.numeric.real.DoubleType;
@@ -19,7 +20,6 @@ import net.imglib2.type.numeric.real.FloatType;
 import net.imglib2.util.ConstantUtils;
 import net.imglib2.util.Intervals;
 import net.imglib2.util.StopWatch;
-import net.imglib2.view.ExtendedRandomAccessibleInterval;
 import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
@@ -44,6 +44,7 @@ import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -262,7 +263,7 @@ public class AverageAffinities {
 						final IntervalView<DoubleType> expanded1 = Views.interval(Views.extendZero(slice1), expandAsNeeded(slice1, offset.offset()));
 						final IntervalView<DoubleType> expanded2 = Views.interval(Views.offset(Views.extendZero(slice1), offset.offset()), expanded1);
 
-						LOG.info(
+						LOG.debug(
 								"Averaging {} voxels for offset {} : [{}:{}] ({})",
 								Intervals.numElements(expanded1),
 								offset,
@@ -278,8 +279,11 @@ public class AverageAffinities {
 						final DoubleType nan = new DoubleType(Double.NaN);
 
 						final StopWatch sw = StopWatch.createAndStart();
+						final double[] minMax = {Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
 						while (source.hasNext()) {
 							final DoubleType s = source.next();
+							minMax[0] = Math.min(s.getRealDouble(), minMax[0]);
+							minMax[1] = Math.max(s.getRealDouble(), minMax[1]);
 							final boolean isInvalid = mask.next().valueEquals(zero);
 							target1.fwd();
 							target2.fwd();
@@ -294,7 +298,7 @@ public class AverageAffinities {
 						}
 						sw.stop();
 
-						LOG.info(
+						LOG.debug(
 								"Averaged {} voxels for offset {} : [{}:{}] ({}) in {}s",
 								Intervals.numElements(expanded1),
 								offset,
@@ -302,6 +306,7 @@ public class AverageAffinities {
 								Intervals.minAsLongArray(expanded1),
 								Intervals.dimensionsAsLongArray(expanded1),
 								sw.nanoTime() * 1e-9);
+						LOG.debug("Min max: {}", minMax);
 
 						// TODO LoopBuilder does not work in Spark
 //						LoopBuilder
@@ -321,9 +326,9 @@ public class AverageAffinities {
 					final RandomAccessible<FloatType> invertedGliaMask = invertedGliaMaskSupplier.get();
 //					final IntervalView<DoubleType> translatedSlice = Views.translate(slice1, min);
 					Views.interval(Views.pair(invertedGliaMask, slice1), slice1).forEach(pair -> pair.getB().mul(pair.getA().getRealDouble()));
-					LOG.info("Glia mask threshold is {}", gliaMaskThreshold);
+					LOG.debug("Glia mask threshold is {}", gliaMaskThreshold);
 					if (!Double.isNaN(gliaMaskThreshold)) {
-						LOG.info("Setting values with inverted glia mask values < {} to NaN", gliaMaskThreshold);
+						LOG.debug("Setting values with inverted glia mask values < {} to NaN", gliaMaskThreshold);
 						Views.interval(Views.pair(invertedGliaMask, slice1), slice1)
 								.forEach(pair -> pair.getB().set(pair.getA().getRealDouble() <= gliaMaskThreshold ? Double.NaN : pair.getB().getRealDouble()));
 					}
@@ -346,7 +351,7 @@ public class AverageAffinities {
 				.count();
 
 	}
-	
+
 	private static long[] ignoreLast(final long[] dims) {
 		final long[] newDims = new long[dims.length - 1];
 		Arrays.setAll(newDims, d -> dims[d]);
@@ -402,7 +407,25 @@ public class AverageAffinities {
 		}
 
 		public RandomAccessible<UnsignedByteType> get() throws IOException {
-			return Views.extendValue(N5Utils.open(container.get(), dataset), new UnsignedByteType(0));
+			RandomAccessibleInterval<UnsignedByteType> rai =
+					container.get().getDatasetAttributes(dataset).getDataType() == DataType.UINT8
+							? N5Utils.open(container.get(), dataset)
+							: getAsUnsignedByteType();
+			// TODO this assumes zero offset in the affinities, consider affinity offset instead!
+			final double[] resolution = Optional.ofNullable(container.get().getAttribute(dataset, "resolution", double[].class)).orElse(new double[] {1.0, 1.0, 1.0});
+			final double[] offset = Optional.ofNullable(container.get().getAttribute(dataset, "offset", double[].class)).orElse(new double[] {0.0, 0.0, 0.0});
+			final long[] longOffset = new long[3];
+			for (int d = 0; d < longOffset.length; ++d) {
+				final double r = offset[d] / resolution[d];
+				longOffset[d] = (long)d;
+				assert r == longOffset[d];
+			}
+			return Views.extendValue(Views.translate(rai, longOffset), new UnsignedByteType(0));
+		}
+
+		private <I extends IntegerType<I> & NativeType<I>> RandomAccessibleInterval<UnsignedByteType> getAsUnsignedByteType() throws IOException {
+			final RandomAccessibleInterval<I> rai = N5Utils.open(container.get(), dataset);
+			return Converters.convert(rai, (s, t) -> t.setInteger(s.getIntegerLong()), new UnsignedByteType());
 		}
 	}
 
