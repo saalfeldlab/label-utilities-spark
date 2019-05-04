@@ -418,8 +418,9 @@ public class AverageAffinities {
 			final long[] longOffset = new long[3];
 			for (int d = 0; d < longOffset.length; ++d) {
 				final double r = offset[d] / resolution[d];
-				longOffset[d] = (long)d;
-				assert r == longOffset[d];
+				final long l = (long) r;
+				longOffset[d] = l;
+				assert r == l;
 			}
 			return Views.extendValue(Views.translate(rai, longOffset), new UnsignedByteType(0));
 		}
