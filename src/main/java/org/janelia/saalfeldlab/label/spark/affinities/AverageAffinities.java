@@ -7,6 +7,7 @@ import net.imglib2.Interval;
 import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.converter.Converter;
 import net.imglib2.converter.Converters;
 import net.imglib2.converter.RealDoubleConverter;
 import net.imglib2.converter.RealFloatConverter;
@@ -44,6 +45,7 @@ import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
@@ -54,6 +56,8 @@ import java.util.stream.Stream;
 public class AverageAffinities {
 
 	private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+
+	private static final String SUCCESS_KEY = "wasSuccessful";
 
 	private static class Args implements Callable<Void> {
 
@@ -201,6 +205,7 @@ public class AverageAffinities {
 		n5OutSupplier.get().createDataset(args.averaged, ignoreLast(inputAttributes.getDimensions()), args.blockSize, DataType.FLOAT32, new GzipCompression());
 		n5InSupplier.get().listAttributes(args.affinities).forEach(ThrowingBiConsumer.unchecked((key, clazz) -> n5OutSupplier.get().setAttribute(args.averaged, key, n5InSupplier.get().getAttribute(args.affinities, key, clazz))));
 		n5OutSupplier.get().createDataset(args.averaged, ignoreLast(inputAttributes.getDimensions()), args.blockSize, DataType.FLOAT32, new GzipCompression());
+		n5OutSupplier.get().setAttribute(args.averaged, SUCCESS_KEY, false);
 
 		final Supplier<RandomAccessible<FloatType>> gliaMaskSupplier = args.gliaMask == null
 				? new ConstantValueRandomAccessibleSupplier(1.0)
@@ -248,67 +253,69 @@ public class AverageAffinities {
 		LOG.info("Parallelizing over blocks {}", blocks);
 
 
-		sc
+		Map<Tuple2<long[], long[]>, Boolean> returnCodes = sc
 				.parallelize(blocks)
 				.mapToPair(block -> new Tuple2<>(block, (RandomAccessibleInterval<FloatType>) N5Utils.open(n5OutSupplier.get(), affinities)))
-				.map(p -> {
-					final long[] min = p._1()._1();
-					final long[] max = p._1()._2();
-					final RandomAccessible<UnsignedByteType> maskRA = maskSupplier.get();
-					final RandomAccessibleInterval<DoubleType> averagedAffinities = ArrayImgs.doubles(Intervals.dimensionsAsLongArray(new FinalInterval(min, max)));
-					final RandomAccessibleInterval<DoubleType> slice1 = Views.translate(averagedAffinities, min);
-					final UnsignedByteType zero = new UnsignedByteType(0);
-					for (final Offset offset : enumeratedOffsets) {
-						final RandomAccessible<FloatType> affs = Views.extendZero(Views.hyperSlice(p._2(), min.length, (long) offset.channelIndex()));
-						final IntervalView<DoubleType> expanded1 = Views.interval(Views.extendZero(slice1), expandAsNeeded(slice1, offset.offset()));
-						final IntervalView<DoubleType> expanded2 = Views.interval(Views.offset(Views.extendZero(slice1), offset.offset()), expanded1);
+				.mapToPair(p -> {
+					boolean wasSuccessful = false;
+					try {
+						final long[] min = p._1()._1();
+						final long[] max = p._1()._2();
+						final RandomAccessible<UnsignedByteType> maskRA = maskSupplier.get();
+						final RandomAccessibleInterval<DoubleType> averagedAffinities = ArrayImgs.doubles(Intervals.dimensionsAsLongArray(new FinalInterval(min, max)));
+						final RandomAccessibleInterval<DoubleType> slice1 = Views.translate(averagedAffinities, min);
+						final UnsignedByteType zero = new UnsignedByteType(0);
+						for (final Offset offset : enumeratedOffsets) {
+							final RandomAccessible<FloatType> affs = Views.extendZero(Views.hyperSlice(p._2(), min.length, (long) offset.channelIndex()));
+							final IntervalView<DoubleType> expanded1 = Views.interval(Views.extendZero(slice1), expandAsNeeded(slice1, offset.offset()));
+							final IntervalView<DoubleType> expanded2 = Views.interval(Views.offset(Views.extendZero(slice1), offset.offset()), expanded1);
 
-						LOG.debug(
-								"Averaging {} voxels for offset {} : [{}:{}] ({})",
-								Intervals.numElements(expanded1),
-								offset,
-								Intervals.minAsLongArray(expanded1),
-								Intervals.minAsLongArray(expanded1),
-								Intervals.dimensionsAsLongArray(expanded1));
+							LOG.debug(
+									"Averaging {} voxels for offset {} : [{}:{}] ({})",
+									Intervals.numElements(expanded1),
+									offset,
+									Intervals.minAsLongArray(expanded1),
+									Intervals.minAsLongArray(expanded1),
+									Intervals.dimensionsAsLongArray(expanded1));
 
-						final Cursor<DoubleType>       source  = Views.flatIterable(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1)).cursor();
-						final Cursor<UnsignedByteType> mask    = Views.flatIterable(Views.interval(maskRA, expanded1)).cursor();
-						final Cursor<DoubleType>       target1 = Views.flatIterable(expanded1).cursor();
-						final Cursor<DoubleType>       target2 = Views.flatIterable(expanded2).cursor();
+							final Cursor<DoubleType> source = Views.flatIterable(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1)).cursor();
+							final Cursor<UnsignedByteType> mask = Views.flatIterable(Views.interval(maskRA, expanded1)).cursor();
+							final Cursor<DoubleType> target1 = Views.flatIterable(expanded1).cursor();
+							final Cursor<DoubleType> target2 = Views.flatIterable(expanded2).cursor();
 
-						final DoubleType nan = new DoubleType(Double.NaN);
+							final DoubleType nan = new DoubleType(Double.NaN);
 
-						final StopWatch sw = StopWatch.createAndStart();
-						final double[] minMax = {Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
-						while (source.hasNext()) {
-							final DoubleType s = source.next();
-							minMax[0] = Math.min(s.getRealDouble(), minMax[0]);
-							minMax[1] = Math.max(s.getRealDouble(), minMax[1]);
-							final boolean isInvalid = mask.next().valueEquals(zero);
-							target1.fwd();
-							target2.fwd();
+							final StopWatch sw = StopWatch.createAndStart();
+							final double[] minMax = {Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
+							while (source.hasNext()) {
+								final DoubleType s = source.next();
+								minMax[0] = Math.min(s.getRealDouble(), minMax[0]);
+								minMax[1] = Math.max(s.getRealDouble(), minMax[1]);
+								final boolean isInvalid = mask.next().valueEquals(zero);
+								target1.fwd();
+								target2.fwd();
 
-							if (isInvalid) {
-								target1.get().add(nan);
-								target2.get().add(nan);
-							} else if (Double.isFinite(s.getRealDouble())) {
-								target1.get().add(s);
-								target2.get().add(s);
+								if (isInvalid) {
+									target1.get().add(nan);
+									target2.get().add(nan);
+								} else if (Double.isFinite(s.getRealDouble())) {
+									target1.get().add(s);
+									target2.get().add(s);
+								}
 							}
-						}
-						sw.stop();
+							sw.stop();
 
-						LOG.debug(
-								"Averaged {} voxels for offset {} : [{}:{}] ({}) in {}s",
-								Intervals.numElements(expanded1),
-								offset,
-								Intervals.minAsLongArray(expanded1),
-								Intervals.minAsLongArray(expanded1),
-								Intervals.dimensionsAsLongArray(expanded1),
-								sw.nanoTime() * 1e-9);
-						LOG.debug("Min max: {}", minMax);
+							LOG.debug(
+									"Averaged {} voxels for offset {} : [{}:{}] ({}) in {}s",
+									Intervals.numElements(expanded1),
+									offset,
+									Intervals.minAsLongArray(expanded1),
+									Intervals.minAsLongArray(expanded1),
+									Intervals.dimensionsAsLongArray(expanded1),
+									sw.nanoTime() * 1e-9);
+							LOG.debug("Min max: {}", minMax);
 
-						// TODO LoopBuilder does not work in Spark
+							// TODO LoopBuilder does not work in Spark
 //						LoopBuilder
 //								.setImages(Views.interval(Converters.convert(affs, new RealDoubleConverter<>(), new DoubleType()), expanded1), expanded1, expanded2)
 //								.forEachPixel((a, s1, s2) -> {
@@ -317,39 +324,51 @@ public class AverageAffinities {
 //										s2.add(a);
 //									}
 //								});
-					}
+						}
 
-					// TODO combine the three loops into a single loop. Probably not that much overhead, though
-					// TODO only write out ROI of mask. Outside doesn't exist anyway!
-					final double factor = 0.5 / enumeratedOffsets.length;
-					Views.iterable(slice1).forEach(px -> px.mul(factor));
+						// TODO combine the three loops into a single loop. Probably not that much overhead, though
+						// TODO only write out ROI of mask. Outside doesn't exist anyway!
+						final double factor = 0.5 / enumeratedOffsets.length;
+						Views.iterable(slice1).forEach(px -> px.mul(factor));
 
-					final RandomAccessible<FloatType> invertedGliaMask = invertedGliaMaskSupplier.get();
+						final RandomAccessible<FloatType> invertedGliaMask = invertedGliaMaskSupplier.get();
 //					final IntervalView<DoubleType> translatedSlice = Views.translate(slice1, min);
-					Views.interval(Views.pair(invertedGliaMask, slice1), slice1).forEach(pair -> pair.getB().mul(pair.getA().getRealDouble()));
-					LOG.debug("Glia mask threshold is {}", gliaMaskThreshold);
-					if (!Double.isNaN(gliaMaskThreshold)) {
-						LOG.debug("Setting values with inverted glia mask values < {} to NaN", gliaMaskThreshold);
-						Views.interval(Views.pair(invertedGliaMask, slice1), slice1)
-								.forEach(pair -> pair.getB().set(pair.getA().getRealDouble() <= gliaMaskThreshold ? Double.NaN : pair.getB().getRealDouble()));
+						Views.interval(Views.pair(invertedGliaMask, slice1), slice1).forEach(pair -> pair.getB().mul(pair.getA().getRealDouble()));
+						LOG.debug("Glia mask threshold is {}", gliaMaskThreshold);
+						if (!Double.isNaN(gliaMaskThreshold)) {
+							LOG.debug("Setting values with inverted glia mask values < {} to NaN", gliaMaskThreshold);
+							Views.interval(Views.pair(invertedGliaMask, slice1), slice1)
+									.forEach(pair -> pair.getB().set(pair.getA().getRealDouble() <= gliaMaskThreshold ? Double.NaN : pair.getB().getRealDouble()));
+						}
+
+						final N5Writer n5 = n5OutSupplier.get();
+						final DatasetAttributes attributes = n5.getDatasetAttributes(averaged);
+						final long[] gridOffset = min.clone();
+						Arrays.setAll(gridOffset, d -> gridOffset[d] / attributes.getBlockSize()[d]);
+
+						N5Utils.saveBlock(
+								Converters.convert(slice1, new RealFloatConverter<>(), new FloatType()),
+								n5OutSupplier.get(),
+								averaged,
+								attributes,
+								gridOffset);
+						LOG.info("Successfully saved block {}", gridOffset);
+						wasSuccessful = true;
+						RandomAccessibleInterval<FloatType> reloaded = Views.interval(N5Utils.<FloatType>open(n5OutSupplier.get(), averaged), slice1);
+						final Cursor<FloatType> r = Views.flatIterable(reloaded).cursor();
+						final Cursor<FloatType> s = Views.flatIterable(Converters.convert(slice1, new RealFloatConverter<>(), new FloatType())).cursor();
+						while (r.hasNext() && wasSuccessful) {
+							wasSuccessful = r.next().valueEquals(s.next());
+						}
+
+					} catch (final Exception e) {
+						wasSuccessful = false;
 					}
-
-					final N5Writer n5 = n5OutSupplier.get();
-					final DatasetAttributes attributes = n5.getDatasetAttributes(averaged);
-					final long[] gridOffset = min.clone();
-					Arrays.setAll(gridOffset, d -> gridOffset[d] / attributes.getBlockSize()[d]);
-
-					N5Utils.saveBlock(
-							Converters.convert(slice1, new RealFloatConverter<>(), new FloatType()),
-							n5OutSupplier.get(),
-							averaged,
-							attributes,
-							gridOffset);
-					LOG.info("Successfully saved block {}", gridOffset);
-
-					return true;
+					return new Tuple2<>(p._1(), wasSuccessful);
 				})
-				.count();
+				.collectAsMap();
+		final boolean wasSuccessful = returnCodes.values().stream().allMatch(b -> b);
+		n5OutSupplier.get().setAttribute(averaged, SUCCESS_KEY, wasSuccessful);
 
 	}
 
