@@ -103,6 +103,8 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 
 	private static final String VERSION_KEY = "version";
 
+	private static final String SUCCESS_KEY = "wasSuccessful";
+
 	private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
 	private static class Args implements Serializable, Callable<Void> {
@@ -236,6 +238,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 				n5out.get(),
 				datasets.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)),
 				attributes);
+		n5out.get().setAttribute(args.labelDatasetsPrefix, SUCCESS_KEY, false);
 
 		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
 		try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
@@ -262,6 +265,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 					args.blocksPerTask,
 					args.relabel);
 		}
+		n5out.get().setAttribute(args.labelDatasetsPrefix, SUCCESS_KEY, true);
 
 	}
 
@@ -371,11 +375,23 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 					}
 
 					N5Utils.saveBlock(labels, n5out.get(), merged, attributes.apply(DataType.UINT64), blockOffset);
+					final IntervalView<UnsignedLongType> reloaded = Views.interval(N5Utils.<UnsignedLongType>open(n5out.get(), merged), block);
+					final Cursor<UnsignedLongType> r = Views.flatIterable(reloaded).cursor();
+					final Cursor<UnsignedLongType> m = Views.flatIterable(labels).cursor();
+					boolean wasSuccessful = true;
+					while(r.hasNext() && wasSuccessful) {
+						wasSuccessful = r.next().valueEquals(m.next());
+					}
 
-					return new Tuple2<>(new Tuple2<>(Intervals.minAsLongArray(t._1()), Intervals.maxAsLongArray(t._1())), ids.size());
+					return new Tuple2<>(new Tuple2<>(Intervals.minAsLongArray(t._1()), Intervals.maxAsLongArray(t._1())), wasSuccessful ? ids.size() : -1);
 				})
 				.collect()
 				;
+
+		if (idCounts.stream().mapToInt(Tuple2::_2).anyMatch(c -> c < 0)) {
+			// TODO log failed blocks. Right now, just throw exception
+			throw new RuntimeException("Not successful in first stage watersheds in blocks");
+		}
 
 		long startIndex = 1;
 		final List<Tuple2<Tuple2<long[], long[]>, Long>> idOffsets = new ArrayList<>();
@@ -449,28 +465,31 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			}
 			n5out.get().setAttribute(blockMerged, "maxId", maxRoot);
 
-			sc
+			final List<Boolean> returnCodes = sc
 					.parallelize(finalMappings)
-					.foreach(t -> {
+					.map(t -> {
 						final Interval interval = new FinalInterval(t._1()._1(), t._1()._2());
 						final TLongLongMap mapping = new TLongLongHashMap(t._2()._1(), t._2()._2());
 
 //						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, mapping);
-						relabel(n5out.get(),  merged, blockMerged, interval, mapping);
+						return relabel(n5out.get(), merged, blockMerged, interval, mapping);
 //						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, mapping);
-					});
+					})
+					.collect();
+			if (returnCodes.stream().anyMatch(r -> !r))
+				throw new RuntimeException("Re-labeling unsuccessful!");
 
 		}
 
 	}
 
-	private static void relabel(
+	private static boolean relabel(
 			final N5Writer n5,
 			final String source,
 			final String target,
 			final Interval interval,
 			final TLongLongMap mapping) throws IOException {
-		SparkWatershedsOnDistanceTransformOfSampledFunction.<UnsignedLongType>relabel(n5, source, target, interval, (src, tgt) -> {
+		return SparkWatershedsOnDistanceTransformOfSampledFunction.<UnsignedLongType>relabel(n5, source, target, interval, (src, tgt) -> {
 			final long val = mapping.get(src.getIntegerLong());
 			if (val != 0)
 				tgt.set(val);
@@ -487,7 +506,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		SparkWatershedsOnDistanceTransformOfSampledFunction.<UnsignedLongType>relabel(n5, source, target, interval, (src, tgt) -> tgt.set(mapper.applyAsLong(src.getIntegerLong())));
 	}
 
-	private static <T extends IntegerType<T> & NativeType<T>> void relabel(
+	private static <T extends IntegerType<T> & NativeType<T>> boolean relabel(
 			final N5Writer n5,
 			final String source,
 			final String target,
@@ -511,6 +530,12 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		final long[] blockPos = Intervals.minAsLongArray(interval);
 		grid.getCellPosition(blockPos, blockPos);
 		N5Utils.saveBlock(copy, n5, target, attributes, blockPos);
+		final Cursor<UnsignedLongType> reloaded = Views.flatIterable(Views.interval(N5Utils.<UnsignedLongType>open(n5, target), interval)).cursor();
+		final Cursor<T> c = Views.flatIterable(copy).cursor();
+		while (c.hasNext())
+			if (c.next().getIntegerLong() != reloaded.next().getIntegerLong())
+				return false;
+		return true;
 	}
 
 	private static void relabel(
