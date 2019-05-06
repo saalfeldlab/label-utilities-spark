@@ -240,6 +240,10 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 				attributes);
 		n5out.get().setAttribute(args.labelDatasetsPrefix, SUCCESS_KEY, false);
 
+		if (!Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, SUCCESS_KEY, Boolean.class)).orElse(false)) {
+			throw new RuntimeException("Failure: Tried to run watersheds on unsuccesful affinities!");
+		}
+
 		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
 		try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
 
