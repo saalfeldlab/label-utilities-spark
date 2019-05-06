@@ -354,20 +354,27 @@ public class AverageAffinities {
 								gridOffset);
 						LOG.info("Successfully saved block {}", gridOffset);
 						wasSuccessful = true;
-						RandomAccessibleInterval<FloatType> reloaded = Views.interval(N5Utils.<FloatType>open(n5OutSupplier.get(), averaged), slice1);
+						final RandomAccessibleInterval<FloatType> reloaded = Views.interval(N5Utils.<FloatType>open(n5OutSupplier.get(), averaged), new FinalInterval(min, max));
 						final Cursor<FloatType> r = Views.flatIterable(reloaded).cursor();
 						final Cursor<FloatType> s = Views.flatIterable(Converters.convert(slice1, new RealFloatConverter<>(), new FloatType())).cursor();
 						while (r.hasNext() && wasSuccessful) {
 							wasSuccessful = r.next().valueEquals(s.next());
 						}
+						if (!wasSuccessful)
+							throw new RuntimeException("Not successful for block " + Arrays.toString(min) + " " + Arrays.toString(max));
 
 					} catch (final Exception e) {
 						wasSuccessful = false;
+						throw e instanceof RuntimeException ? (RuntimeException) e : new RuntimeException(e);
 					}
 					return new Tuple2<>(p._1(), wasSuccessful);
 				})
 				.collectAsMap();
 		final boolean wasSuccessful = returnCodes.values().stream().allMatch(b -> b);
+		if (!wasSuccessful)
+			throw new RuntimeException(String.format(
+					"Not successful in blocks %s",
+					returnCodes.entrySet().stream().filter(Map.Entry::getValue).map(e -> String.format("(%s, %s)", Arrays.toString(e.getKey()._1()), Arrays.toString(e.getKey()._2()))).collect(Collectors.toList())));
 		n5OutSupplier.get().setAttribute(averaged, SUCCESS_KEY, wasSuccessful);
 
 	}
