@@ -7,11 +7,11 @@ import net.imglib2.Interval;
 import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.Grids;
-import net.imglib2.converter.Converter;
 import net.imglib2.converter.Converters;
 import net.imglib2.converter.RealDoubleConverter;
 import net.imglib2.converter.RealFloatConverter;
 import net.imglib2.img.array.ArrayImgs;
+import net.imglib2.img.cell.CellGrid;
 import net.imglib2.type.NativeType;
 import net.imglib2.type.numeric.IntegerType;
 import net.imglib2.type.numeric.RealType;
@@ -25,6 +25,7 @@ import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.janelia.saalfeldlab.n5.DataBlock;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
@@ -111,7 +112,7 @@ public class AverageAffinities {
 
 		@Expose
 		@CommandLine.Option(names = "--offsets", arity = "1..*", paramLabel = "OFFSETS", description = "Structuring elements for affinities. Defaults to -1,0,0 0,-1,0 0,0,-1.", converter = Offset.Converter.class)
-		Offset[] offsets = {new Offset(-1, 0, 0), new Offset(0, -1, 0), new Offset(0, 0, -1)};
+		Offset[] offsets = {new Offset(0, -1, 0, 0), new Offset(1, 0, -1, 0), new Offset(2, 0, 0, -1)};
 
 		@Expose
 		@CommandLine.Option(names = "--block-size", paramLabel = "BLOCK_SIZE", description = "Block size of output. Defaults to input block size w/o channel dim if not specified.", split = ",")
@@ -255,10 +256,9 @@ public class AverageAffinities {
 
 		Map<Tuple2<long[], long[]>, Boolean> returnCodes = sc
 				.parallelize(blocks)
-				.mapToPair(block -> new Tuple2<>(block, (RandomAccessibleInterval<FloatType>) N5Utils.open(n5OutSupplier.get(), affinities)))
+				.mapToPair(block -> new Tuple2<>(block, (RandomAccessibleInterval<FloatType>) N5Utils.open(n5InSupplier.get(), affinities)))
 				.mapToPair(p -> {
 					boolean wasSuccessful = false;
-					try {
 						final long[] min = p._1()._1();
 						final long[] max = p._1()._2();
 						final RandomAccessible<UnsignedByteType> maskRA = maskSupplier.get();
@@ -346,36 +346,86 @@ public class AverageAffinities {
 						final long[] gridOffset = min.clone();
 						Arrays.setAll(gridOffset, d -> gridOffset[d] / attributes.getBlockSize()[d]);
 
-						N5Utils.saveBlock(
-								Converters.convert(slice1, new RealFloatConverter<>(), new FloatType()),
-								n5OutSupplier.get(),
-								averaged,
-								attributes,
-								gridOffset);
-						LOG.info("Successfully saved block {}", gridOffset);
-						wasSuccessful = true;
-						final RandomAccessibleInterval<FloatType> reloaded = Views.interval(N5Utils.<FloatType>open(n5OutSupplier.get(), averaged), new FinalInterval(min, max));
-						final Cursor<FloatType> r = Views.flatIterable(reloaded).cursor();
-						final Cursor<FloatType> s = Views.flatIterable(Converters.convert(slice1, new RealFloatConverter<>(), new FloatType())).cursor();
-						while (r.hasNext() && wasSuccessful) {
-							wasSuccessful = r.next().valueEquals(s.next());
+						final List<Interval> saveTheseBlocks = Grids.collectAllContainedIntervals(min, max, attributes.getBlockSize());
+						final CellGrid grid = new CellGrid(attributes.getDimensions(), attributes.getBlockSize());
+						final boolean[] success = new boolean[saveTheseBlocks.size()];
+						final N5Writer n5out = n5OutSupplier.get();
+						for (int attempt = 0; attempt < 4; ++attempt) {
+							for (int i = 0; i < saveTheseBlocks.size(); ++i) {
+
+								if (success[i]) continue;
+
+								final Interval saveThisBlock = saveTheseBlocks.get(i);
+								final long[] saveThisBlockAt = Intervals.minAsLongArray(saveThisBlock);
+								grid.getCellPosition(saveThisBlockAt, saveThisBlockAt);
+								final int[] size = Intervals.dimensionsAsIntArray(saveThisBlock);
+								final DataBlock<float[]> block = (DataBlock<float[]>) DataType.FLOAT32.createDataBlock(size, saveThisBlockAt);
+								final Cursor<DoubleType> c = Views.flatIterable(Views.interval(slice1, saveThisBlock)).cursor();
+								for (int k = 0; c.hasNext(); ++k) {
+									block.getData()[k] = c.next().getRealFloat();
+								}
+								success[i] = false;
+								try {
+									n5out.writeBlock(averaged, attributes, block);
+									final DataBlock<float[]> reloaded = (DataBlock<float[]>) n5out.readBlock(averaged, attributes, saveThisBlockAt);
+									success[i] = Arrays.equals(block.getData(), reloaded.getData());
+								} catch (Exception e) {
+									success[i] = false;
+								}
+							}
 						}
-						if (!wasSuccessful)
-							throw new RuntimeException("Not successful for block " + Arrays.toString(min) + " " + Arrays.toString(max));
+						final List<Interval> failedBlocks = IntStream
+								.range(0, saveTheseBlocks.size())
+								.filter(idx -> !success[idx])
+								.mapToObj(saveTheseBlocks::get)
+								.collect(Collectors.toList());
+					try {
+						if (failedBlocks.size() > 0)
+							throw new RuntimeException("Unable to save these blocks in 4 attempts: " + failedBlocks);
+						else
+							wasSuccessful = true;
+
+//						N5Utils.saveBlock(
+//								Converters.convert(slice1, new RealFloatConverter<>(), new FloatType()),
+//								n5OutSupplier.get(),
+//								averaged,
+//								attributes,
+//								gridOffset);
+//						wasSuccessful = true;
+//						final RandomAccessibleInterval<FloatType> reloaded = Views.interval(N5Utils.<FloatType>open(n5OutSupplier.get(), averaged), new FinalInterval(min, max));
+//						final Cursor<FloatType> r = Views.flatIterable(reloaded).cursor();
+//						final Cursor<FloatType> s = Views.flatIterable(Converters.convert(slice1, new RealFloatConverter<>(), new FloatType())).cursor();
+//						while (r.hasNext() && wasSuccessful) {
+//							wasSuccessful = r.next().valueEquals(s.next());
+//						}
+//						if (!wasSuccessful)
+//							throw new RuntimeException("Not successful for block " + Arrays.toString(min) + " " + Arrays.toString(max));
+//						else
+//							LOG.info("Successfully saved block {}", gridOffset);
 
 					} catch (final Exception e) {
 						wasSuccessful = false;
-						throw e instanceof RuntimeException ? (RuntimeException) e : new RuntimeException(e);
+//						throw e instanceof RuntimeException ? (RuntimeException) e : new RuntimeException(e);
 					}
 					return new Tuple2<>(p._1(), wasSuccessful);
 				})
 				.collectAsMap();
+		LOG.info("Finished averaging.");
 		final boolean wasSuccessful = returnCodes.values().stream().allMatch(b -> b);
-		if (!wasSuccessful)
+		LOG.info("Was successful? {}", wasSuccessful);
+		n5OutSupplier.get().setAttribute(averaged, SUCCESS_KEY, wasSuccessful);
+		if (!wasSuccessful) {
+			final List<String> failedInTheseBlocks = returnCodes
+					.entrySet()
+					.stream()
+					.filter(e -> !e.getValue())
+					.map(e -> String.format("(%s, %s)", Arrays.toString(e.getKey()._1()), Arrays.toString(e.getKey()._2())))
+					.collect(Collectors.toList());
+			LOG.warn("Failed in these blocks! {}", failedInTheseBlocks);
 			throw new RuntimeException(String.format(
 					"Not successful in blocks %s",
-					returnCodes.entrySet().stream().filter(Map.Entry::getValue).map(e -> String.format("(%s, %s)", Arrays.toString(e.getKey()._1()), Arrays.toString(e.getKey()._2()))).collect(Collectors.toList())));
-		n5OutSupplier.get().setAttribute(averaged, SUCCESS_KEY, wasSuccessful);
+					failedInTheseBlocks));
+		}
 
 	}
 
