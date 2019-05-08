@@ -233,7 +233,10 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		final Map<String, DatasetAttributes> datasets = new HashMap<>();
 		Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT64, new GzipCompression())));
 		Arrays.asList(float64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.FLOAT64, new GzipCompression())));
-
+		LOG.info("uint64 datasets: {}", (Object)uint64Datasets);
+		LOG.info("float64 datasets: {}", (Object)float64Datasets);
+		LOG.info("Datasets: {}", datasets);
+		LOG.info("Labels prefix: {}", args.labelDatasetsPrefix);
 		prepareOutputDatasets(
 				n5out.get(),
 				datasets.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)),
@@ -379,13 +382,14 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 					}
 
 					N5Utils.saveBlock(labels, n5out.get(), merged, attributes.apply(DataType.UINT64), blockOffset);
-					final IntervalView<UnsignedLongType> reloaded = Views.interval(N5Utils.<UnsignedLongType>open(n5out.get(), merged), block);
-					final Cursor<UnsignedLongType> r = Views.flatIterable(reloaded).cursor();
-					final Cursor<UnsignedLongType> m = Views.flatIterable(labels).cursor();
-					boolean wasSuccessful = true;
-					while(r.hasNext() && wasSuccessful) {
-						wasSuccessful = r.next().valueEquals(m.next());
-					}
+					final boolean wasSuccessful = true;
+//					final IntervalView<UnsignedLongType> reloaded = Views.interval(N5Utils.<UnsignedLongType>open(n5out.get(), merged), block);
+//					final Cursor<UnsignedLongType> r = Views.flatIterable(reloaded).cursor();
+//					final Cursor<UnsignedLongType> m = Views.flatIterable(labels).cursor();
+//					boolean wasSuccessful = true;
+//					while(r.hasNext() && wasSuccessful) {
+//						wasSuccessful = r.next().valueEquals(m.next());
+//					}
 
 					return new Tuple2<>(new Tuple2<>(Intervals.minAsLongArray(t._1()), Intervals.maxAsLongArray(t._1())), wasSuccessful ? ids.size() : -1);
 				})
@@ -534,11 +538,11 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		final long[] blockPos = Intervals.minAsLongArray(interval);
 		grid.getCellPosition(blockPos, blockPos);
 		N5Utils.saveBlock(copy, n5, target, attributes, blockPos);
-		final Cursor<UnsignedLongType> reloaded = Views.flatIterable(Views.interval(N5Utils.<UnsignedLongType>open(n5, target), interval)).cursor();
-		final Cursor<T> c = Views.flatIterable(copy).cursor();
-		while (c.hasNext())
-			if (c.next().getIntegerLong() != reloaded.next().getIntegerLong())
-				return false;
+//		final Cursor<UnsignedLongType> reloaded = Views.flatIterable(Views.interval(N5Utils.<UnsignedLongType>open(n5, target), interval)).cursor();
+//		final Cursor<T> c = Views.flatIterable(copy).cursor();
+//		while (c.hasNext())
+//			if (c.next().getIntegerLong() != reloaded.next().getIntegerLong())
+//				return false;
 		return true;
 	}
 
