@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -59,6 +60,8 @@ public class AverageAffinities {
 	private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
 	private static final String SUCCESS_KEY = "wasSuccessful";
+
+	private static final DoubleType NAN = new DoubleType(Double.NaN);
 
 	private static class Args implements Callable<Void> {
 
@@ -127,6 +130,9 @@ public class AverageAffinities {
 
 		@CommandLine.Option(names = "--json-disable-html-escape", defaultValue = "true")
 		transient Boolean disbaleHtmlEscape;
+
+		@CommandLine.Option(names = "--nan-oob-affinities", defaultValue = "false")
+		Boolean nanOobAffinities = false;
 
 		@Override
 		public Void call() throws Exception {
@@ -223,6 +229,7 @@ public class AverageAffinities {
 					new MaskSupplier(new N5WriterSupplier(args.maskContainer, false, true), args.mask, args.networkFovDiff),
 					gliaMaskSupplier,
 					args.gliaMaskThreshold,
+					args.nanOobAffinities,
 					args.affinities,
 					args.averaged,
 					args.enumeratedOffsets());
@@ -239,6 +246,7 @@ public class AverageAffinities {
 			final MaskSupplier maskSupplier,
 			final Supplier<RandomAccessible<FloatType>> invertedGliaMaskSupplier,
 			final double gliaMaskThreshold,
+			final boolean nanOoobAffinities,
 			final String affinities,
 			final String averaged,
 			final Offset[] enumeratedOffsets) throws IOException {
@@ -265,6 +273,9 @@ public class AverageAffinities {
 						final RandomAccessibleInterval<DoubleType> averagedAffinities = ArrayImgs.doubles(Intervals.dimensionsAsLongArray(new FinalInterval(min, max)));
 						final RandomAccessibleInterval<DoubleType> slice1 = Views.translate(averagedAffinities, min);
 						final UnsignedByteType zero = new UnsignedByteType(0);
+						final Consumer<DoubleType> invalidAction = nanOoobAffinities
+								? t -> t.add(NAN)
+								: t -> {};
 						for (final Offset offset : enumeratedOffsets) {
 							final RandomAccessible<FloatType> affs = Views.extendZero(Views.hyperSlice(p._2(), min.length, (long) offset.channelIndex()));
 							final IntervalView<DoubleType> expanded1 = Views.interval(Views.extendZero(slice1), expandAsNeeded(slice1, offset.offset()));
@@ -283,8 +294,6 @@ public class AverageAffinities {
 							final Cursor<DoubleType> target1 = Views.flatIterable(expanded1).cursor();
 							final Cursor<DoubleType> target2 = Views.flatIterable(expanded2).cursor();
 
-							final DoubleType nan = new DoubleType(Double.NaN);
-
 							final StopWatch sw = StopWatch.createAndStart();
 							final double[] minMax = {Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
 							while (source.hasNext()) {
@@ -296,8 +305,8 @@ public class AverageAffinities {
 								target2.fwd();
 
 								if (isInvalid) {
-									target1.get().add(nan);
-									target2.get().add(nan);
+									invalidAction.accept(target1.get());
+									invalidAction.accept(target2.get());
 								} else if (Double.isFinite(s.getRealDouble())) {
 									target1.get().add(s);
 									target2.get().add(s);
