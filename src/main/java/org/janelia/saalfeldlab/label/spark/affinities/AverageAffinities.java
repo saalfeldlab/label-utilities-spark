@@ -1,6 +1,8 @@
 package org.janelia.saalfeldlab.label.spark.affinities;
 
 import com.google.gson.annotations.Expose;
+import com.pivovarit.function.ThrowingBiConsumer;
+import com.pivovarit.function.ThrowingSupplier;
 import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
@@ -37,8 +39,6 @@ import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
-import pl.touk.throwing.ThrowingBiConsumer;
-import pl.touk.throwing.ThrowingSupplier;
 import scala.Tuple2;
 
 import java.io.IOException;
