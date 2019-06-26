@@ -10,7 +10,6 @@ import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
-import pl.touk.throwing.ThrowingConsumer;
 
 import java.io.IOException;
 import java.util.Arrays;
