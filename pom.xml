@@ -30,7 +30,7 @@
 	<mailingLists>
 		<mailingList>
 			<name>ImageJ Forum</name>
-			<archive>http://forum.image.sc/</archive>
+			<archive>http://image.sc/</archive>
 		</mailingList>
 	</mailingLists>
 
@@ -79,15 +79,15 @@
 		<license.licenseName>bsd_2</license.licenseName>
 		<license.copyrightOwners>Stephan Saalfeld</license.copyrightOwners>
 
-		<!-- NB: Deploy releases to the ImageJ Maven repository. -->
-		<releaseProfiles>deploy-to-imagej</releaseProfiles>
+		<!-- NB: Deploy releases to the SciJava Maven repository. -->
+		<releaseProfiles>deploy-to-scijava</releaseProfiles>
 		<package-name>org.janelia.saalfeldlab.label.spark</package-name>
 	</properties>
 
 	<repositories>
 		<repository>
-			<id>imagej.public</id>
-			<url>http://maven.imagej.net/content/groups/public</url>
+			<id>scijava.public</id>
+			<url>http://maven.scijava.org/content/groups/public</url>
 		</repository>
 	</repositories>
 
