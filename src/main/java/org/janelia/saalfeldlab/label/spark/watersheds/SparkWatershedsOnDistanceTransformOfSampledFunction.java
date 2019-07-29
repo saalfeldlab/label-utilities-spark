@@ -2,6 +2,7 @@ package org.janelia.saalfeldlab.label.spark.watersheds;
 
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.Expose;
+import com.pivovarit.function.ThrowingBiConsumer;
 import gnu.trove.iterator.TLongIntIterator;
 import gnu.trove.iterator.TLongObjectIterator;
 import gnu.trove.list.array.TDoubleArrayList;
@@ -63,7 +64,6 @@ import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
-import pl.touk.throwing.ThrowingBiConsumer;
 import scala.Tuple2;
 
 import java.io.IOException;
