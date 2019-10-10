@@ -103,6 +103,11 @@
 			<version>0.1.1</version>
 		</dependency>
 		<dependency>
+			<groupId>org.janelia.saalfeldlab</groupId>
+			<artifactId>imglib2-mutex-watershed</artifactId>
+			<version>0.1.2-SNAPSHOT</version>
+		</dependency>
+		<dependency>
 			<groupId>org.apache.spark</groupId>
 			<artifactId>spark-core_2.11</artifactId>
 		</dependency>

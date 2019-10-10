@@ -17,23 +17,15 @@ import gnu.trove.set.hash.TLongHashSet;
 import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
-import net.imglib2.Point;
 import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.gauss3.Gauss3;
-import net.imglib2.algorithm.labeling.Watersheds;
-import net.imglib2.algorithm.localextrema.LocalExtrema;
-import net.imglib2.algorithm.morphology.distance.DistanceTransform;
-import net.imglib2.algorithm.neighborhood.DiamondShape;
 import net.imglib2.algorithm.util.Grids;
 import net.imglib2.algorithm.util.unionfind.LongHashMapUnionFind;
 import net.imglib2.algorithm.util.unionfind.UnionFind;
-import net.imglib2.converter.Converter;
-import net.imglib2.converter.Converters;
 import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgFactory;
 import net.imglib2.img.array.ArrayImgs;
-import net.imglib2.img.array.ArrayRandomAccess;
 import net.imglib2.img.basictypeaccess.array.FloatArray;
 import net.imglib2.img.basictypeaccess.array.LongArray;
 import net.imglib2.img.cell.CellGrid;
@@ -42,8 +34,8 @@ import net.imglib2.type.NativeType;
 import net.imglib2.type.numeric.IntegerType;
 import net.imglib2.type.numeric.RealType;
 import net.imglib2.type.numeric.integer.UnsignedLongType;
-import net.imglib2.type.numeric.real.DoubleType;
 import net.imglib2.type.numeric.real.FloatType;
+import net.imglib2.util.ConstantUtils;
 import net.imglib2.util.Intervals;
 import net.imglib2.util.Util;
 import net.imglib2.view.IntervalView;
@@ -51,7 +43,9 @@ import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.PairFunction;
+import org.janelia.saalfeldlab.imglib2.mutex.MutexWatershed;
 import org.janelia.saalfeldlab.label.spark.Version;
+import org.janelia.saalfeldlab.n5.DataBlock;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
@@ -86,10 +80,9 @@ import java.util.function.LongFunction;
 import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 
-public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
+public class SparkMutexWatersheds {
 
 	private static final String RESOLUTION_KEY = "resolution";
 
@@ -103,14 +96,12 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 
 	private static final String VERSION_KEY = "version";
 
-	private static final String SUCCESS_KEY = "wasSuccessful";
-
 	private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-	private static class Args implements Serializable, Callable<Void> {
+	private static class Args implements Serializable, Callable<Integer> {
 
 		@Expose
-		@CommandLine.Parameters(arity = "1", paramLabel = "INPUT_CONTAINER", description = "Path to N5 container with averagedAffinities dataset.")
+		@CommandLine.Option(names = "--input-container", paramLabel = "INPUT_CONTAINER", description = "Path to N5 container with affinities dataset.", required = true)
 		String inputContainer = null;
 
 		@Expose
@@ -118,59 +109,67 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 		String outputContainer = null;
 
 		@Expose
-		@CommandLine.Option(names = "--averaged-affinity-dataset", paramLabel = "AFFINITIES", description = "Path of averagedAffinities dataset in INPUT_CONTAINER.")
-		String averagedAffinities = "volumes/averagedAffinities/prediction-average";
+		@CommandLine.Option(names = "--offsets", paramLabel = "OFFSETS", arity = "1..*", split = ",")
+		long[][] offsets = {
+				{-1, 0, 0}, {-2, 0, 0}, {-5, 0, 0}, {-10, 0, 0},
+				{0, -1, 0}, {0, -2, 0}, {0, -5, 0}, {0, -10, 0},
+				{0, 0, -1}, {0, 0, -2}, {0, 0, -5}, {0, 0, -10},
+		};
+
+		@Expose
+		@CommandLine.Option(names = "--mask-container", paramLabel = "MASK_CONTAINER", description = "Path to output container. Defaults to INPUT_CONTAINER.")
+		String maskContainer = null;
+
+		@Expose
+		@CommandLine.Option(names = "--affinities-dataset", paramLabel = "AFFINITIES", description = "Path of affinities dataset in INPUT_CONTAINER.", required = true)
+		String affinities;
+
+		@Expose
+		@CommandLine.Option(names = "--mask-dataset", paramLabel = "MASK", description = "Path of mask dataset in MASK_CONTAINER.")
+		String mask;
+
+		@Expose
+		@CommandLine.Option(names = "--glia-dataset", paramLabel = "GLIA_DATASET", description = "Weigh affinities by glia prediction (if provided)")
+		String gliaPrediction = null;
 
 		@Expose
 		@CommandLine.Option(names = "--label-datasets-prefix", paramLabel = "LABEL_DATASETS_PREFIX", defaultValue = "volumes/labels", description = "Will be prepended to datasets: ${LABEL_DATASETS_PREFIX}/${LABEL_DATASET}. Set to empty String to ignore.")
 		String labelDatasetsPrefix;
 
 		@Expose
-		@CommandLine.Option(names = "--watershed-seeds-dataset", description = "Path in container: ${LABEL_DATASETS_PREFIX}/${WATERSHED_SEEDS_DATASET", defaultValue = "watershed-seeds")
-		String watershedSeeds = "watershed-seeds";
+		@CommandLine.Option(names = "--mutex-watersheds-dataset", paramLabel = "WATERSHEDS", description = "Path in container: ${LABEL_DATASETS_PREFIX}/${WATERSHEDS}", defaultValue = "mutex-watersheds")
+		String mutexWatersheds;
 
 		@Expose
-		@CommandLine.Option(names = "--seeded-watersheds-dataset", paramLabel = "WATERSHEDS", description = "Path in container: ${LABEL_DATASETS_PREFIX}/${WATERSHEDS}", defaultValue = "seeded-watersheds")
-		String seededWatersheds;
-
-		@Expose
-		@CommandLine.Option(names = "--merged-dataset", paramLabel = "WATERSHEDS_MERGED", description = "Path in container: ${LABEL_DATASETS_PREFIX}/${WATERSHEDS_MERGED}", defaultValue = "watersheds-merged")
-		String merged;
-
-		@Expose
-		@CommandLine.Option(names = "--block-merged-dataset", paramLabel = "MERGED", description = "Path in container: ${LABEL_DATASETS_PREFIX}/${MERGED}", defaultValue = "merged")
+		@CommandLine.Option(names = "--block-merged-dataset", paramLabel = "MERGED", description = "Path in container: ${LABEL_DATASETS_PREFIX}/${MERGED}", defaultValue = "mutex-watersheds-merged")
 		String blockMerged;
 
 		@Expose
-		@CommandLine.Option(names = "--distance-transform-dataset", paramLabel = "DISTANCE_TRANSFORM", description = "Path in container: ${LABEL_DATASETS_PREFIX}/${DISTANCE_TRANSFORM}", defaultValue = "distance-transform")
-		String distanceTransform;
+		@CommandLine.Option(names = "--block-size", paramLabel = "BLOCK_SIZE", description = "Block size of output.", split = ",", defaultValue = "64,64,64")
+		int[] blockSize;
 
 		@Expose
-		@CommandLine.Option(names = "--block-size", paramLabel = "BLOCK_SIZE", description = "Block size of output.", split = ",")
-		int[] blockSize = {64, 64, 64};
+		@CommandLine.Option(names = "--blocks-per-task", paramLabel = "BLOCKS_PER_TASK", description = "How many blocks to combine for watersheds/connected components (one value per dimension)", split = ",", defaultValue = "1,1,1")
+		int[] blocksPerTask;
 
 		@Expose
-		@CommandLine.Option(names = "--blocks-per-task", paramLabel = "BLOCKS_PER_TASK", description = "How many blocks to combine for watersheds/connected components (one value per dimension)", split=",")
-		int[] blocksPerTask = {1, 1, 1};
+		@CommandLine.Option(names = "--threshold", paramLabel = "THRESHOLD", description = "Threshold for affinities. If no threshold is provided, all nearest neighbor affinities will be used for attractive edges, all other affinities will be repulsive.")
+		Double threshold;
 
 		@Expose
-		@CommandLine.Option(names = "--weight-distance-transform", paramLabel = "WEIGHT_DISTANCE_TRANSFORM", description = "Weight to balance squared distance and affinity value.", defaultValue = "0.01")
-		Double weightDistanceTransform;
+		@CommandLine.Option(names = "--halo", paramLabel = "HALO", description = "Include halo region to run connected components/watersheds", split = ",")
+		int[] halo = {0, 0, 0};
 
 		@Expose
-		@CommandLine.Option(names = "--merge-fragment-threshold", paramLabel = "THRESHOLD", description = "Merge fragments with higher median affinity than this.")
-		Double mergeFragmentThreshold = Double.NEGATIVE_INFINITY;
-
-		@Expose
-		@CommandLine.Option(names = "--minimum-seed-distance-from-boundary", paramLabel = "SEED_DISTANCE", description = "Only extract seeds for watershed that are at least SEED_DISTANCE away from boundary (Distance transform takes into account resolution of dataset).", defaultValue = "0.0")
-		Double seedDistance;
+		@CommandLine.Option(names = "--cropped-datasets-pattern", paramLabel = "CROPPED_DATASETS_PATTERN", description = "All data sets are stored with halo by default. Cropped versions according to this.", defaultValue = "%s-cropped")
+		String croppedDatasetPattern;
 
 		@Expose
 		@CommandLine.Option(names = "--relabel", paramLabel = "RELABEL", description = "Relabel all label data sets for unique labels", defaultValue = "false")
 		Boolean relabel;
 
 		@Expose
-		@CommandLine.Option(names = "--revert-array-attributes", paramLabel = "RELABEL", description = "Revert all array attributes (that are not dataset attributes)", defaultValue = "false")
+		@CommandLine.Option(names = "--revert-array-attributes", paramLabel = "REVERT", description = "Revert all array attributes (that are not dataset attributes)", defaultValue = "false")
 		Boolean revertArrayAttributes;
 
 		@CommandLine.Option(names = "--json-pretty-print", defaultValue = "true")
@@ -179,18 +178,96 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 		@CommandLine.Option(names = "--json-disable-html-escape", defaultValue = "true")
 		transient Boolean disbaleHtmlEscape;
 
-		@CommandLine.Option(names = { "-h", "--help"}, usageHelp = true, description = "Display this help and exit")
+		@CommandLine.Option(names = {"-h", "--help"}, usageHelp = true, description = "Display this help and exit")
 		private Boolean help;
 
-		@Override
-		public Void call() {
+		@CommandLine.Option(names = "--min-object-size", description = "Only objects larger than `MIN_OBJECT_SIZE' will be foreground, if specified")
+		private Long minObjectSize;
 
-			watershedSeeds = String.join("/", labelDatasetsPrefix, watershedSeeds);
-			seededWatersheds = String.join("/", labelDatasetsPrefix, seededWatersheds);
-			merged = String.join("/", labelDatasetsPrefix, merged);
+		@Override
+		public Integer call() throws IOException {
+
+			if (help != null && help)
+				return 0;
+
+			mutexWatersheds = String.join("/", labelDatasetsPrefix, mutexWatersheds);
 			blockMerged = String.join("/", labelDatasetsPrefix, blockMerged);
-			distanceTransform = String.join("/", labelDatasetsPrefix, distanceTransform);
-			return null;
+
+			final N5WriterSupplier n5in = new N5WriterSupplier(inputContainer, prettyPrint, disbaleHtmlEscape);
+
+			final N5WriterSupplier maskIn = maskContainer==null
+					? n5in
+					:new N5WriterSupplier(maskContainer, prettyPrint, disbaleHtmlEscape);
+
+			final N5WriterSupplier n5out = outputContainer==null
+					? n5in
+					:new N5WriterSupplier(outputContainer, prettyPrint, disbaleHtmlEscape);
+
+			final DatasetAttributes inputAttributes = n5in.get().getDatasetAttributes(affinities);
+			final long[] inputDims = inputAttributes.getDimensions();
+			final long[] outputDims = new long[inputDims.length - 1];
+			Arrays.setAll(outputDims, d -> inputDims[d]);
+
+			final Map<String, Object> labelUtilitiesSparkAttributes = new HashMap<>();
+			labelUtilitiesSparkAttributes.put(ARGUMENTS_KEY, this);
+			// TODO how to store argv?
+//			labelUtilitiesSparkAttributes.put(ARGV_KEY, argv);
+			labelUtilitiesSparkAttributes.put(VERSION_KEY, Version.VERSION_STRING);
+			final Map<String, Object> attributes = with(new HashMap<>(), LABEL_UTILITIES_SPARK_KEY, labelUtilitiesSparkAttributes);
+
+
+			final int[] taskBlockSize = IntStream.range(0, blockSize.length).map(d -> blockSize[d] * blocksPerTask[d]).toArray();
+			final boolean hasHalo = Arrays.stream(halo).filter(h -> h!=0).count() > 0;
+			if (hasHalo)
+				throw new UnsupportedOperationException("Halo currently not supported, please omit halo option!");
+
+			String[] uint64Datasets = {mutexWatersheds, blockMerged};
+			String[] uint8Datasets = {};
+
+			final double[] resolution = reverted(Optional.ofNullable(n5in.get().getAttribute(affinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)), revertArrayAttributes);
+			final double[] offset = reverted(Optional.ofNullable(n5in.get().getAttribute(affinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]), revertArrayAttributes);
+			attributes.put(RESOLUTION_KEY, resolution);
+			attributes.put(OFFSET_KEY, offset);
+
+			final Map<String, DatasetAttributes> datasets = new HashMap<>();
+			Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression())));
+			Arrays.asList(uint8Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, blockSize, DataType.UINT8, new GzipCompression())));
+
+			if (hasHalo) {
+				prepareOutputDatasets(
+						n5out.get(),
+						datasets.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> new DatasetAttributes(e.getValue().getDimensions(), taskBlockSize, e.getValue().getDataType(), e.getValue().getCompression()))),
+						attributes);
+			}
+
+			prepareOutputDatasets(
+					n5out.get(),
+					datasets.entrySet().stream().collect(Collectors.toMap(entry -> hasHalo ? String.format(croppedDatasetPattern, entry.getKey()):entry.getKey(), Map.Entry::getValue)),
+					attributes);
+
+			final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
+			try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
+
+				LOG.info("Input  dims:   {}", inputDims);
+				LOG.info("Output dims:   {}", outputDims);
+				run(
+						sc,
+						new CropAffinities(n5in, maskIn, n5in, affinities, mask, gliaPrediction, offsets, IntStream.of(halo).mapToLong(i -> i).toArray()),
+						offsets,
+						n5out,
+						outputDims,
+						IntStream.of(halo).mapToLong(i -> i).toArray(),
+//					new SerializableMergeWatershedsMinThresholdSupplier(threshold),
+						null, //new SerializableMergeWatershedsMedianThresholdSupplier(threshold),
+						blockMerged,
+						mutexWatersheds,
+						croppedDatasetPattern,
+						blockSize,
+						blocksPerTask,
+						relabel);
+			}
+
+			return 0;
 		}
 	}
 
@@ -204,228 +281,99 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 
 		final Args args = new Args();
 		CommandLine.call(args, argv);
-
-		final N5WriterSupplier n5in = new N5WriterSupplier(args.inputContainer, args.prettyPrint, args.disbaleHtmlEscape);
-
-		final N5WriterSupplier n5out = args.outputContainer == null
-				? n5in
-				: new N5WriterSupplier(args.outputContainer, args.prettyPrint, args.disbaleHtmlEscape);
-
-		final DatasetAttributes inputAttributes = n5in.get().getDatasetAttributes(args.averagedAffinities);
-		final long[] inputDims = inputAttributes.getDimensions();
-		final long[] outputDims = inputDims.clone();
-
-		final Map<String, Object> labelUtilitiesSparkAttributes = new HashMap<>();
-		labelUtilitiesSparkAttributes.put(ARGUMENTS_KEY, args);
-		labelUtilitiesSparkAttributes.put(ARGV_KEY, argv);
-		labelUtilitiesSparkAttributes.put(VERSION_KEY, Version.VERSION_STRING);
-		final Map<String, Object> attributes = with(new HashMap<>(), LABEL_UTILITIES_SPARK_KEY, labelUtilitiesSparkAttributes);
-
-
-		String[] uint64Datasets = {args.merged, args.seededWatersheds, args.watershedSeeds, args.blockMerged};
-		String[] float64Datasets = {args.distanceTransform};
-
-		final double[] resolution = reverted(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)), args.revertArrayAttributes);
-		final double[] offset = reverted(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]), args.revertArrayAttributes);
-		attributes.put(RESOLUTION_KEY, resolution);
-		attributes.put(OFFSET_KEY, offset);
-
-		final Map<String, DatasetAttributes> datasets = new HashMap<>();
-		Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT64, new GzipCompression())));
-		Arrays.asList(float64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.FLOAT64, new GzipCompression())));
-		LOG.info("uint64 datasets: {}", (Object)uint64Datasets);
-		LOG.info("float64 datasets: {}", (Object)float64Datasets);
-		LOG.info("Datasets: {}", datasets);
-		LOG.info("Labels prefix: {}", args.labelDatasetsPrefix);
-		prepareOutputDatasets(
-				n5out.get(),
-				datasets.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)),
-				attributes);
-		n5out.get().setAttribute(args.labelDatasetsPrefix, SUCCESS_KEY, false);
-
-		if (!Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, SUCCESS_KEY, Boolean.class)).orElse(false)) {
-			throw new RuntimeException("Failure: Tried to run watersheds on unsuccesful affinities!");
-		}
-
-		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
-		try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
-
-			LOG.info("Input  dims:   {}", inputDims);
-			LOG.info("Output dims:   {}", outputDims);
-			run(
-					sc,
-					n5in,
-					n5out,
-					outputDims,
-					DoubleStream.of(resolution).map(d -> d / DoubleStream.of(resolution).min().getAsDouble()).map(d -> args.weightDistanceTransform * d * d).toArray(), // TODO maybe pass these as parameters through CLI instead?
-					args.seedDistance,
-//					new SerializableMergeWatershedsMinThresholdSupplier(args.threshold),
-					new SerializableMergeWatershedsMedianThresholdSupplier(args.mergeFragmentThreshold),
-					args.mergeFragmentThreshold,
-					args.averagedAffinities,
-					args.distanceTransform,
-					args.merged,
-					args.blockMerged,
-					args.watershedSeeds,
-					args.seededWatersheds,
-					args.blockSize,
-					args.blocksPerTask,
-					args.relabel);
-		}
-		n5out.get().setAttribute(args.labelDatasetsPrefix, SUCCESS_KEY, true);
-
 	}
 
 	public static void run(
 			final JavaSparkContext sc,
-			final Supplier<? extends N5Reader> n5in,
+			final PairFunction<Interval, Interval, RandomAccessibleInterval<FloatType>> affinitiesProvider,
+			final long[][] offsets,
 			final Supplier<? extends N5Writer> n5out,
 			final long[] outputDims,
-			final double[] distanceTransformWeights,
-			final double minimumDistanceFromBoundary,
+			final long[] halo,
 			final Supplier<MergeWatersheds> mergeWatershedregions,
-			final double mergeFragmentsThreshold,
-			final String averagedAffinities,
-			final String distanceTransform,
-			final String merged,
 			final String blockMerged,
-			final String watershedSeeds,
-			final String seededWatersheds,
+			final String watersheds,
+			final String croppedDatasetPattern,
 			final int[] blockSize,
 			final int[] blocksPerTask,
 			final boolean relabel) throws IOException {
 
+		final boolean hasHalo = Arrays.stream(halo).filter(h -> h!=0).count() > 0;
 		final int[] watershedBlockSize = IntStream.range(0, blockSize.length).map(d -> blockSize[d] * blocksPerTask[d]).toArray();
 		final List<Tuple2<long[], long[]>> watershedBlocks = Grids
 				.collectAllContainedIntervals(outputDims, watershedBlockSize)
 				.stream()
 				.map(i -> new Tuple2<>(Intervals.minAsLongArray(i), Intervals.maxAsLongArray(i)))
 				.collect(Collectors.toList());
+		;
+		final long[] negativeHalo = new long[halo.length];
+		Arrays.setAll(negativeHalo, d -> -halo[d]);
 
 		final List<Tuple2<Tuple2<long[], long[]>, Integer>> idCounts = sc
 				.parallelize(watershedBlocks)
 				.map(t -> (Interval) new FinalInterval(t._1(), t._2()))
-				.mapToPair(new CropAffinitiesToDistanceTransform(n5in, averagedAffinities, distanceTransformWeights))
+				.mapToPair(affinitiesProvider)
 				.mapToPair(t -> {
 					final Interval block = t._1();
-					final RandomAccessibleInterval<DoubleType> relief = Views.zeroMin(t._2()._2());
-					final RandomAccessibleInterval<FloatType> affs = Views.zeroMin(t._2()._1());
-					// we expect that there are no NaNs in the relief. Replace NaNs with Double.NEGATIVE_INFINITY as appropriate
-					// Any point that is surrounded entirely by NaN will be added as seed point by default. This is not the behavior
-					// we would like to have
-					final List<Point> seeds = new ArrayList<>();
-					final long[] min = Intervals.minAsLongArray(relief);
-					final long[] max = Intervals.maxAsLongArray(relief);
-					for (int d = 0; d < relief.numDimensions(); ++d) {
-
-						final long m = min[d];
-						final long M = max[d];
-						final IntervalView<DoubleType> reliefIntervalMin = Views.hyperSlice(relief, d, m);
-						final IntervalView<DoubleType> reliefIntervalMax = Views.hyperSlice(relief, d, M);
-
-						final List<Point> borderSeedsMin = LocalExtrema
-								.findLocalExtrema(
-										Converters.convert(Views.extendZero(reliefIntervalMin), (src, tgt) -> tgt.setReal(Double.isNaN(src.getRealDouble()) ? 0.0 : src.getRealDouble()), new DoubleType()),
-										reliefIntervalMin,
-										new LocalExtrema.MaximumCheck<>(new DoubleType(minimumDistanceFromBoundary)))
-								.stream()
-								.map(p -> new Point(p.getLongPosition(0), p.getLongPosition(1), m))
-								.collect(Collectors.toList());
-
-						final List<Point> borderSeedsMax = LocalExtrema
-								.findLocalExtrema(
-										Converters.convert(Views.extendZero(reliefIntervalMax), (src, tgt) -> tgt.setReal(Double.isNaN(src.getRealDouble()) ? 0.0 : src.getRealDouble()), new DoubleType()),
-										reliefIntervalMax,
-										new LocalExtrema.MaximumCheck<>(new DoubleType(minimumDistanceFromBoundary)))
-								.stream()
-								.map(p -> new Point(p.getLongPosition(0), p.getLongPosition(1), M))
-								.collect(Collectors.toList());
-
-						seeds.addAll(borderSeedsMin);
-						seeds.addAll(borderSeedsMax);
-
-					}
-					LOG.debug("Got {} seeds", seeds.size());
-
+					final RandomAccessibleInterval<FloatType> affinities = t._2();
 					final CellGrid grid = new CellGrid(outputDims, blockSize);
+					final CellGrid watershedsGrid = new CellGrid(outputDims, watershedBlockSize);
+					LOG.debug("Got grids {} and {}", grid, watershedsGrid);
 
 					final long[] blockOffset = Intervals.minAsLongArray(block);
+					final long[] watershedsBlockOffset = blockOffset.clone();
 					grid.getCellPosition(blockOffset, blockOffset);
-					LOG.debug("min={} blockOffset={}", Intervals.minAsLongArray(block), blockOffset);
+					watershedsGrid.getCellPosition(watershedsBlockOffset, watershedsBlockOffset);
+					LOG.debug("min={} blockOffset={} watershedsBlockOffset={}", Intervals.minAsLongArray(block), blockOffset, watershedsBlockOffset);
 
-					final long[] dims = Intervals.dimensionsAsLongArray(relief);
+					final long[] dims = Intervals.dimensionsAsLongArray(Views.hyperSlice(affinities, affinities.numDimensions() - 1, affinities.min(affinities.numDimensions() - 1)));
 					final ArrayImg<UnsignedLongType, LongArray> labels = ArrayImgs.unsignedLongs(dims);
-					{
-						final ArrayRandomAccess<UnsignedLongType> labelsAccess = labels.randomAccess();
-						for (int i = 0; i < seeds.size(); ++i) {
-							labelsAccess.setPosition(seeds.get(i));
-							labelsAccess.get().setInteger(i + 1L);
-						}
-					}
 
-					final Function<DataType, DatasetAttributes> attributes = dt -> new DatasetAttributes(outputDims, blockSize, dt, new GzipCompression());
 
-					LOG.debug("Saving relief");
-					// Save relief
-					N5Utils.saveBlock(relief, n5out.get(), distanceTransform, attributes.apply(DataType.FLOAT64), blockOffset);
+					final Interval relevantInterval = Intervals.expand(labels, negativeHalo);
 
-					LOG.debug("Found watershed seeds {}", seeds);
-					N5Utils.saveBlock(labels, n5out.get(), watershedSeeds, attributes.apply(DataType.UINT64), blockOffset);
-
-					Watersheds.seededRealType(
-							Views.extendValue(relief, new DoubleType(Double.NaN)),
+					final DatasetAttributes croppedAttributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression());
+					final DatasetAttributes watershedAttributes = new DatasetAttributes(outputDims, watershedBlockSize, DataType.UINT64, new GzipCompression());
+					final long nextId = MutexWatershed.computeMutexWatershedClustering(
+							affinities,
 							labels,
-							seeds,
-							(value, ref) -> value.getRealDouble() == 0 ? Double.NaN : -value.getRealDouble(),
-							new DiamondShape(1));
-
-					N5Utils.saveBlock(labels, n5out.get(), seededWatersheds, attributes.apply(DataType.UINT64), blockOffset);
-
-					final LongUnaryOperator mapping = mergeWatershedregions.get().getMapping(affs, labels, seeds.size() + 1);
+							offsets,
+							Arrays.stream(offsets).mapToDouble(o -> isNearestNeighbor(o) ? 1.0:0.05).toArray(),
+							0.5);
 
 					// TODO find better logic instead of label == 0 check
 					final TLongSet ids = new TLongHashSet();
 					final TLongIntHashMap counts = new TLongIntHashMap();
 					for (final UnsignedLongType pix : labels) {
 						final long label = pix.getIntegerLong();
-						if (label == 0)
+						if (label==0)
 							counts.put(label, counts.get(label) + 1);
 						else {
-							final long root = mapping.applyAsLong(pix.getIntegerLong());
-							ids.add(root);
-							counts.put(root, counts.get(root) + 1);
-							if (root != 0)
-								pix.setInteger(root);
+							ids.add(label);
+							counts.put(label, counts.get(label) + 1);
 						}
 					}
 
-					for (final UnsignedLongType pix : labels) {
-						if (counts.get(pix.getIntegerLong()) == 1) {
-							counts.remove(pix.getIntegerLong());
-							counts.put(0, counts.get(0) + 1);
-							pix.setZero();
-						}
-					}
-
-					N5Utils.saveBlock(labels, n5out.get(), merged, attributes.apply(DataType.UINT64), blockOffset);
-					final boolean wasSuccessful = true;
-//					final IntervalView<UnsignedLongType> reloaded = Views.interval(N5Utils.<UnsignedLongType>open(n5out.get(), merged), block);
-//					final Cursor<UnsignedLongType> r = Views.flatIterable(reloaded).cursor();
-//					final Cursor<UnsignedLongType> m = Views.flatIterable(labels).cursor();
-//					boolean wasSuccessful = true;
-//					while(r.hasNext() && wasSuccessful) {
-//						wasSuccessful = r.next().valueEquals(m.next());
+					// TODO filter by size!!
+//					for (final UnsignedLongType pix : labels) {
+//						final long label = pix.getIntegerLong();
+//						if (counts.get(label)==1) {
+//							counts.remove(label);
+//							ids.remove(label);
+//							counts.put(0, counts.get(0) + 1);
+//							pix.setZero();
+//						}
 //					}
+//
+					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, watersheds):watersheds, croppedAttributes, blockOffset);
+					if (hasHalo) {
+						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
+						n5out.get().writeBlock(watersheds, watershedAttributes, dataBlock);
+					}
 
-					return new Tuple2<>(new Tuple2<>(Intervals.minAsLongArray(t._1()), Intervals.maxAsLongArray(t._1())), wasSuccessful ? ids.size() : -1);
+					return new Tuple2<>(new Tuple2<>(Intervals.minAsLongArray(t._1()), Intervals.maxAsLongArray(t._1())), ids.size());
 				})
-				.collect()
-				;
-
-		if (idCounts.stream().mapToInt(Tuple2::_2).anyMatch(c -> c < 0)) {
-			// TODO log failed blocks. Right now, just throw exception
-			throw new RuntimeException("Not successful in first stage watersheds in blocks");
-		}
+				.collect();
 
 		long startIndex = 1;
 		final List<Tuple2<Tuple2<long[], long[]>, Long>> idOffsets = new ArrayList<>();
@@ -434,96 +382,103 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 			startIndex += idCount._2();
 		}
 
-		if (relabel) {
-			final long numBlocks = sc
-					.parallelizePairs(idOffsets)
-					.map(t -> {
-						LOG.debug("Relabeling block ({} {}) starting at id {}", t._1()._1(), t._1()._2(), t._2());
-						final N5Writer n5 = n5out.get();
-						final Interval interval = new FinalInterval(t._1()._1(), t._1()._2());
-//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, t._2());
-						relabel(n5, merged, merged, interval, t._2());
-//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, t._2());
-
-						// TODO do halo relabeling
-
-						return true;
-					})
-					.count();
-			LOG.debug("Relabeled {} blocks", numBlocks);
-			final long maxId = startIndex;
-			LOG.info("Found max id {}", maxId);
-			n5out.get().setAttribute(watershedSeeds, "maxId", maxId);
-			n5out.get().setAttribute(merged, "maxId", maxId);
-			n5out.get().setAttribute(seededWatersheds, "maxId", maxId);
-
-//			final IntArrayUnionFind uf = findOverlappingLabelsArgMaxNoHalo(sc, n5out, merged, new IntArrayUnionFind((int) (maxId + 2)), outputDims, blockSize, blocksPerTask, 0);
-			final LongHashMapUnionFind uf = findOverlappingLabelsThresholdMedianEdgeAffinities(
-					sc,
-					n5out,
-					n5in,
-					merged,
-					averagedAffinities,
-					mergeFragmentsThreshold,
-					new LongHashMapUnionFind(),
-					outputDims,
-					blockSize,
-					blocksPerTask,
-					0);
-			LOG.debug("{} sets are grouped into {} sets", uf.size(), uf.setCount());
-
-			final List<Tuple2<Tuple2<long[], long[]>, Tuple2<long[], long[]>>> finalMappings = new ArrayList<>();
-			long maxRoot = 0;
-			for (int index = 0; index < idOffsets.size(); ++index) {
-				final Tuple2<Tuple2<long[], long[]>, Long> idOffset = idOffsets.get(index);
-				final long minLabel = idOffset._2();
-				final long maxLabel = index < idOffsets.size() - 1
-						? idOffsets.get(index + 1)._2()
-						: (maxId);
-
-				LOG.debug("Max label = {} min label = {} for block ({} {})", maxLabel, minLabel, idOffset._1()._1(), idOffset._1()._2());
-				final long[] keys = new long[(int) (maxLabel - minLabel)];
-				final long[] vals = new long[keys.length];
-
-
-				for (int i = 0; i < keys.length; ++i) {
-					final long k = i + minLabel;
-					final long root = uf.findRoot(k);
-					keys[i] = k;
-					vals[i] = root;
-					if (root > maxRoot) {
-						maxRoot = root;
-					}
-				}
-				finalMappings.add(new Tuple2<>(idOffset._1(), new Tuple2<>(keys, vals)));
-			}
-			n5out.get().setAttribute(blockMerged, "maxId", maxRoot);
-
-			final List<Boolean> returnCodes = sc
-					.parallelize(finalMappings)
-					.map(t -> {
-						final Interval interval = new FinalInterval(t._1()._1(), t._1()._2());
-						final TLongLongMap mapping = new TLongLongHashMap(t._2()._1(), t._2()._2());
-
-//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, mapping);
-						return relabel(n5out.get(), merged, blockMerged, interval, mapping);
-//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, mapping);
-					})
-					.collect();
-			if (returnCodes.stream().anyMatch(r -> !r))
-				throw new RuntimeException("Re-labeling unsuccessful!");
-
-		}
-
+		// TODO: Relabel!!
+//		if (relabel) {
+//			final long numBlocks = sc
+//					.parallelizePairs(idOffsets)
+//					.map(t -> {
+//						LOG.debug("Relabeling block ({} {}) starting at id {}", t._1()._1(), t._1()._2(), t._2());
+//						final N5Writer n5 = n5out.get();
+//						final Interval interval = new FinalInterval(t._1()._1(), t._1()._2());
+////						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, t._2());
+//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, merged) : merged, merged, interval, t._2());
+////						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, t._2());
+//						if (hasHalo)
+//							throw new UnsupportedOperationException("Halo relabeling not implemented yet!");
+//
+//						// TODO do halo relabeling
+//
+//						return true;
+//					})
+//					.count();
+//			LOG.debug("Relabeled {} blocks", numBlocks);
+//			final long maxId = startIndex;
+//			LOG.info("Found max id {}", maxId);
+//			n5out.get().setAttribute(hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, "maxId", maxId);
+//			n5out.get().setAttribute(hasHalo ? String.format(croppedDatasetPattern, merged) : merged, "maxId", maxId);
+//			n5out.get().setAttribute(hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, "maxId", maxId);
+//
+//			if (hasHalo)
+//				throw new UnsupportedOperationException("Halo relabeling not implemented yet!");
+//
+//			if (maxId + 2 > Integer.MAX_VALUE)
+//				throw new RuntimeException("Currently only Integer.MAX_VALUE labels supported");
+//
+////			final IntArrayUnionFind uf = findOverlappingLabelsArgMaxNoHalo(sc, n5out, merged, new IntArrayUnionFind((int) (maxId + 2)), outputDims, blockSize, blocksPerTask, 0);
+//			final LongHashMapUnionFind uf = findOverlappingLabelsThresholdMedianEdgeAffinities(
+//					sc,
+//					n5out,
+//					n5in,
+//					merged,
+//					averagedAffinities,
+//					mergeFragmentsThreshold,
+//					new LongHashMapUnionFind(),
+//					outputDims,
+//					blockSize,
+//					blocksPerTask,
+//					0);
+//			LOG.debug("{} sets are grouped into {} sets", uf.size(), uf.setCount());
+//
+//			final List<Tuple2<Tuple2<long[], long[]>, Tuple2<long[], long[]>>> finalMappings = new ArrayList<>();
+//			long maxRoot = 0;
+//			for (int index = 0; index < idOffsets.size(); ++index) {
+//				final Tuple2<Tuple2<long[], long[]>, Long> idOffset = idOffsets.get(index);
+//				final long minLabel = idOffset._2();
+//				final long maxLabel = index < idOffsets.size() - 1
+//						? idOffsets.get(index + 1)._2()
+//						: (maxId);
+//
+//				LOG.debug("Max label = {} min label = {} for block ({} {})", maxLabel, minLabel, idOffset._1()._1(), idOffset._1()._2());
+//				final long[] keys = new long[(int) (maxLabel - minLabel)];
+//				final long[] vals = new long[keys.length];
+//
+//
+//				for (int i = 0; i < keys.length; ++i) {
+//					final long k = i + minLabel;
+//					final long root = uf.findRoot(k);
+//					keys[i] = k;
+//					vals[i] = root;
+//					if (root > maxRoot) {
+//						maxRoot = root;
+//					}
+//				}
+//				finalMappings.add(new Tuple2<>(idOffset._1(), new Tuple2<>(keys, vals)));
+//			}
+//			n5out.get().setAttribute(blockMerged, "maxId", maxRoot);
+//
+//			sc
+//					.parallelize(finalMappings)
+//					.foreach(t -> {
+//						final Interval interval = new FinalInterval(t._1()._1(), t._1()._2());
+//						final TLongLongMap mapping = new TLongLongHashMap(t._2()._1(), t._2()._2());
+//
+////						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, mapping);
+//						relabel(n5out.get(), hasHalo ? String.format(croppedDatasetPattern, merged) : merged, blockMerged, interval, mapping);
+////						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, mapping);
+//						if (hasHalo)
+//							throw new UnsupportedOperationException("Halo relabeling not implemented yet!");
+//					});
+//
+//		}
 	}
 
-	private static boolean relabel(
+	private static void relabel(
 			final N5Writer n5,
 			final String source,
 			final String target,
 			final Interval interval,
 			final TLongLongMap mapping) throws IOException {
-		return SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge.<UnsignedLongType>relabel(n5, source, target, interval, (src, tgt) -> {
+		SparkMutexWatersheds.<UnsignedLongType>relabel(n5, source, target, interval, (src, tgt) -> {
 			final long val = mapping.get(src.getIntegerLong());
 			if (val != 0)
 				tgt.set(val);
@@ -537,10 +492,10 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 			final Interval interval,
 			final long addIfNotZero) throws IOException {
 		final CachedMapper mapper = new CachedMapper(addIfNotZero);
-		SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge.<UnsignedLongType>relabel(n5, source, target, interval, (src, tgt) -> tgt.set(mapper.applyAsLong(src.getIntegerLong())));
+		SparkMutexWatersheds.<UnsignedLongType>relabel(n5, source, target, interval, (src, tgt) -> tgt.set(mapper.applyAsLong(src.getIntegerLong())));
 	}
 
-	private static <T extends IntegerType<T> & NativeType<T>> boolean relabel(
+	private static <T extends IntegerType<T> & NativeType<T>> void relabel(
 			final N5Writer n5,
 			final String source,
 			final String target,
@@ -564,12 +519,6 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 		final long[] blockPos = Intervals.minAsLongArray(interval);
 		grid.getCellPosition(blockPos, blockPos);
 		N5Utils.saveBlock(copy, n5, target, attributes, blockPos);
-//		final Cursor<UnsignedLongType> reloaded = Views.flatIterable(Views.interval(N5Utils.<UnsignedLongType>open(n5, target), interval)).cursor();
-//		final Cursor<T> c = Views.flatIterable(copy).cursor();
-//		while (c.hasNext())
-//			if (c.next().getIntegerLong() != reloaded.next().getIntegerLong())
-//				return false;
-		return true;
 	}
 
 	private static void relabel(
@@ -759,7 +708,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 		final List<Tuple2<long[], long[]>> doubleSizeBlocks = Grids
 				.collectAllContainedIntervals(dimensions, taskBlockSize)
 				.stream()
-				.map(interval -> SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge.toMinMaxTuple(interval, Tuple2::new))
+				.map(interval -> SparkMutexWatersheds.toMinMaxTuple(interval, Tuple2::new))
 				.collect(Collectors.toList());
 
 		final List<Tuple2<long[], long[]>> mappings = sc
@@ -821,8 +770,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 										"Found same label {} in slices {} and {} for dimension {}",
 										thisLabel,
 										thisSliceIndex,
-										thatSliceIndex,
-										dim);
+										thatSliceIndex);
 								throw new RuntimeException("Got the same label in two different blocks -- impossible: " + thisLabel);
 							}
 
@@ -919,7 +867,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 		final List<Tuple2<long[], long[]>> doubleSizeBlocks = Grids
 				.collectAllContainedIntervals(dimensions, taskBlockSize)
 				.stream()
-				.map(interval -> SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge.toMinMaxTuple(interval, Tuple2::new))
+				.map(interval -> SparkMutexWatersheds.toMinMaxTuple(interval, Tuple2::new))
 				.collect(Collectors.toList());
 
 		final List<Tuple2<long[], long[]>> mappings = sc
@@ -968,8 +916,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 										"Found same label {} in slices {} and {} for dimension {}",
 										thisLabel,
 										thisSliceIndex,
-										thatSliceIndex,
-										dim);
+										thatSliceIndex);
 								throw new RuntimeException("Got the same label in two different blocks -- impossible: " + thisLabel);
 							}
 
@@ -1034,75 +981,94 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 
 	}
 
-	private static class CropAffinitiesToDistanceTransform implements PairFunction<Interval, Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<DoubleType>>> {
+	private static class CropAffinities implements PairFunction<Interval, Interval, RandomAccessibleInterval<FloatType>> {
 
 		private final Supplier<? extends N5Reader> n5in;
 
+		private final Supplier<? extends N5Reader> maskN5;
+
+		private final Supplier<? extends N5Reader> gliaN5;
+
 		private final String affinities;
 
-		private final double[] weights;
+		private final String maskDataset;
 
-		private CropAffinitiesToDistanceTransform(
+		private final String gliaDataset;
+
+		private final long[][] offsets;
+
+		private final long[] halo;
+
+		private CropAffinities(
 				final Supplier<? extends N5Reader> n5in,
+				final Supplier<? extends N5Reader> maskN5,
+				final Supplier<? extends N5Reader> gliaN5,
 				final String affinities,
-				final double[] weights) {
+				final String maskDataset,
+				final String gliaDataset,
+				final long[][] offsets,
+				final long[] halo) {
 			this.n5in = n5in;
+			this.maskN5 = maskN5;
+			this.gliaN5 = gliaN5;
 			this.affinities = affinities;
-			this.weights = weights;
-		}
-
-		private static class ReplaceNaNWith<T extends RealType<T>> implements Converter<T, T> {
-
-			private final double replacement;
-
-			private ReplaceNaNWith(double replacement) {
-				this.replacement = replacement;
-			}
-
-			@Override
-			public void convert(T src, T tgt) {
-				final double t = src.getRealDouble();
-				tgt.setReal(Double.isNaN(t) ? replacement : t);
-			}
+			this.maskDataset = maskDataset;
+			this.gliaDataset = gliaDataset;
+			this.halo = halo;
+			this.offsets = offsets;
 		}
 
 		@Override
-		public Tuple2<Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<DoubleType>>> call(final Interval interval) throws Exception {
-			final RandomAccessibleInterval<FloatType> affsImg = N5Utils.open(n5in.get(), affinities);
+		public Tuple2<Interval, RandomAccessibleInterval<FloatType>> call(final Interval interval) throws Exception {
 
-			final RandomAccessible<FloatType> affs = Converters.convert(Views.extendValue(affsImg, new FloatType(0.0f)), new ReplaceNaNWith<>(0.0), new FloatType());
-			final long[] min = Intervals.minAsLongArray(interval);
+			final RandomAccessibleInterval<FloatType> affs = N5Utils.open(n5in.get(), affinities);
 
-			// TODO expose border as parameter
-			final Interval withContext = Intervals.expand(interval, 32, 32, 32);
-			final RandomAccessibleInterval<DoubleType> distanceTransform = ArrayImgs.doubles(Intervals.dimensionsAsLongArray(withContext));
-			final RandomAccessibleInterval<FloatType> affsCrop = ArrayImgs.floats(Intervals.dimensionsAsLongArray(interval));
-			LoopBuilder.setImages(affsCrop, Views.interval(affsImg, interval)).forEachPixel(FloatType::set);
-			// have to use ! here because of possible NaN values
-			DistanceTransform.transform(
-					Views.zeroMin(Views.interval(Converters.convert(affs, (src, tgt) -> tgt.setReal(src.getRealDouble() * src.getRealDouble()), new DoubleType()), withContext)),
-					distanceTransform,
-					DistanceTransform.DISTANCE_TYPE.EUCLIDIAN,
-					weights
-			);
-			// TODO should we actually rewrite those?
-			double[] minMax = new double[] {Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
-			LoopBuilder
-					.setImages(Views.interval(affs, withContext), distanceTransform)
-					.forEachPixel((a, d) -> {
-						if (Float.isNaN(a.getRealFloat()))
-							d.setReal(Double.NaN);
-						else {
-							final double v = Math.sqrt(d.getRealDouble());
-							d.setReal(v);
-							if (v < minMax[0])
-								minMax[0] = v;
-							if (v > minMax[1])
-								minMax[1] = v;
-						}
-					});
-			LOG.debug("min max = {}", minMax);
-			return new Tuple2<>(interval, new Tuple2<>(Views.translate(affsCrop, Intervals.minAsLongArray(interval)), Views.interval(Views.translate(distanceTransform, Intervals.minAsLongArray(withContext)), interval)));
+			final RandomAccessible<FloatType> glia = gliaN5 == null || gliaN5.get() == null || gliaDataset == null
+					? ConstantUtils.constantRandomAccessible(new FloatType(0.0f), affs.numDimensions() - 1)
+					: Views.extendZero(N5Utils.<FloatType>open(gliaN5.get(), gliaDataset));
+
+			final RandomAccessible<UnsignedLongType> mask = maskN5 == null || maskN5.get() == null || gliaDataset == null
+					? ConstantUtils.constantRandomAccessible(new UnsignedLongType(1), affs.numDimensions() - 1)
+					: Views.extendZero(N5Utils.<UnsignedLongType>open(maskN5.get(), maskDataset));
+
+
+			final Interval withHalo = Intervals.expand(interval, halo);
+
+			final long[] min = new long[withHalo.numDimensions() + 1];
+			final long[] max = new long[withHalo.numDimensions() + 1];
+			withHalo.min(min);
+			withHalo.max(max);
+			min[min.length - 1] = affs.min(min.length - 1);
+			max[max.length - 1] = affs.max(max.length - 1);
+			final RandomAccessibleInterval<UnsignedLongType> fromMask = Views.interval(mask, withHalo);
+			final RandomAccessibleInterval<FloatType> gliaWithHalo = Views.interval(glia, withHalo);
+			final Interval targetInterval = new FinalInterval(min, max);
+			final ArrayImg<FloatType, FloatArray> affinityCrop = ArrayImgs.floats(Intervals.dimensionsAsLongArray(targetInterval));
+
+			for (int i = 0; i < offsets.length; ++i) {
+				final long[] offset = offsets[i];
+				final RandomAccessibleInterval<FloatType> affinityCropSlice = Views.hyperSlice(affinityCrop, affs.numDimensions() - 1, (long) i);
+				final RandomAccessibleInterval<FloatType> affinitySlice = Views.interval(Views.extendValue(Views.hyperSlice(affs, affs.numDimensions() - 1, (long) i), new FloatType(Float.NaN)), withHalo);
+				final RandomAccessibleInterval<UnsignedLongType> toMask = Views.interval(Views.extendZero(fromMask), Intervals.translate(withHalo, offset));
+				final RandomAccessibleInterval<FloatType> fromGlia = Views.interval(glia, withHalo);
+				final RandomAccessibleInterval<FloatType> toGlia = Views.interval(glia, Intervals.translate(withHalo, offset));
+
+				LoopBuilder
+						.setImages(affinitySlice, affinityCropSlice, fromMask, toMask, fromGlia, toGlia)
+						.forEachPixel((s, t, fM, tM, fG, tG) -> {
+							final boolean isOutsideMask = fM.getIntegerLong() == 0 || tM.getIntegerLong() == 0;
+							if (isOutsideMask)
+								t.setReal(Double.NaN);
+							else {
+								final double gliaWeight = Math.max(Math.min(1.0 - fG.getRealDouble(), 1.0), 0.0) * (1.0 - Math.max(Math.min(1.0 - tG.getRealDouble(), 1.0), 0.0));
+								t.setReal(gliaWeight * s.getRealDouble());
+							}
+						});
+
+			}
+
+
+			return new Tuple2<>(interval, affinityCrop);
 		}
 	}
 
@@ -1168,6 +1134,10 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 		final T t = mappingFactory.apply(key);
 		map.put(key, t);
 		return t;
+	}
+
+	private static boolean isNearestNeighbor(long[] offset) {
+		return Arrays.stream(offset).map(o -> o * o).sum() <= 1;
 	}
 
 }
