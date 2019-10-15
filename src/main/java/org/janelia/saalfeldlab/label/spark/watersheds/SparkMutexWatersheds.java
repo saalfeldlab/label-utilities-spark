@@ -13,7 +13,6 @@ import net.imglib2.Interval;
 import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.Grids;
-import net.imglib2.algorithm.util.unionfind.IntArrayUnionFind;
 import net.imglib2.algorithm.util.unionfind.LongHashMapUnionFind;
 import net.imglib2.algorithm.util.unionfind.UnionFind;
 import net.imglib2.img.array.ArrayImgs;
@@ -29,7 +28,6 @@ import net.imglib2.util.ConstantUtils;
 import net.imglib2.util.IntervalIndexer;
 import net.imglib2.util.Intervals;
 import net.imglib2.util.StopWatch;
-import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -50,6 +48,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
@@ -80,6 +79,9 @@ public class SparkMutexWatersheds {
 //		@CommandLine.Option(names = {"--threshold", "-t"}, split = ",")
 		Double threshold = null;
 
+		@CommandLine.Option(names = {"--overwrite-existing"})
+		boolean overwriteExisting = false;
+
 
 
 		public static void main(String... args) {
@@ -89,6 +91,9 @@ public class SparkMutexWatersheds {
 		@Override
 		public Integer call() throws IOException {
 
+			if (blocksPerTask.length == 1)
+				blocksPerTask = new int[] {blocksPerTask[0], blocksPerTask[0], blocksPerTask[0]};
+
 
 			final SparkConf conf = new SparkConf().setAppName(CREMI.class.getName());
 			try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
@@ -97,21 +102,22 @@ public class SparkMutexWatersheds {
 						final String basePath = basePathFor(setup, iteration);
 						for (final String sample: samples) {
 							final String containerPath = containerPathFor(sample);
-							final String affinitiesDataset = affinitiesFrom(basePath);
-							final long[] outputSize = Intervals.dimensionsAsLongArray(Views.collapse((RandomAccessibleInterval) N5Utils.open(new N5FSReader(containerPath), affinitiesDataset)));
+							final String gliaDataset = gliaFrom(basePath);
+							final long[] outputSize = Intervals.dimensionsAsLongArray(N5Utils.open(new N5FSReader(containerPath), gliaDataset));
 							final StopWatch sw = StopWatch.createAndStart();
 							runMutexWatersheds(
 									sc,
 									containerPath,
-									affinitiesDataset,
-									null, // TODO mask dataset
-									null, // TODO glia dataset
-									mutexWatershedDatasetFrom(threshold),
-									mutexWatershedRelabeledDatasetFrom(threshold),
-									mutexWatershedMergedDatasetFrom(threshold),
+									affinitiesFrom(basePath),
+									MASK_DATASET,
+									gliaDataset,
+									mutexWatershedDatasetFrom(basePath, threshold),
+									mutexWatershedRelabeledDatasetFrom(basePath, threshold),
+									mutexWatershedMergedDatasetFrom(basePath, threshold),
 									outputSize,
 									blockSize,
 									blocksPerTask,
+									overwriteExisting,
 									OFFSETS);
 							sw.stop();
 							System.out.println(String.format(
@@ -131,6 +137,7 @@ public class SparkMutexWatersheds {
 
 		private static final String BASE_PATH_PATTERN = "volumes/predictions/neuron_ids-unlabeled-unmask-background/%d/%d";
 
+		private static final String MASK_DATASET = "volumes/masks/prediction-mask";
 
 		private static final long[][] OFFSETS = {
 				{-1, 0, 0}, {-2, 0, 0}, {-5, 0, 0}, {-10, 0, 0},
@@ -155,6 +162,18 @@ public class SparkMutexWatersheds {
 
 		private static String gliaFrom(final String basePath) {
 			return datasetFrom(basePath, "glia");
+		}
+
+		private static String mutexWatershedDatasetFrom(final String basePath, final Double threshold) {
+			return String.format("%s/%s", basePath, mutexWatershedDatasetFrom(threshold));
+		}
+
+		private static String mutexWatershedRelabeledDatasetFrom(final String basePath, final Double threshold) {
+			return String.format("%s/%s", basePath, mutexWatershedRelabeledDatasetFrom(threshold));
+		}
+
+		private static String mutexWatershedMergedDatasetFrom(final String basePath, final Double threshold) {
+			return String.format("%s/%s", basePath, mutexWatershedMergedDatasetFrom(threshold));
 		}
 
 		private static String mutexWatershedDatasetFrom(final Double threshold) {
@@ -236,6 +255,7 @@ public class SparkMutexWatersheds {
 			final long[] outputSize,
 			final int[] blockSize,
 			final int[] blocksPerTask,
+			final boolean overwriteExisting,
 			final long[]... offsets) throws IOException {
 		runMutexWatersheds(
 				sc,
@@ -252,6 +272,7 @@ public class SparkMutexWatersheds {
 				outputSize,
 				blockSize,
 				blocksPerTask,
+				overwriteExisting,
 				offsets);
 	}
 
@@ -273,13 +294,21 @@ public class SparkMutexWatersheds {
 			final long[] outputSize,
 			final int[] blockSize,
 			final int[] blocksPerTask,
+			final boolean overwriteExisting,
 			final long[]... offsets) throws IOException {
+		final N5WriterSupplier outputContainerSupplier = new N5WriterSupplier(outputContainer);
+		if (outputContainerSupplier.get().datasetExists(mutexWatershedMergedDataset)
+				&& Optional.ofNullable(outputContainerSupplier.get().getAttribute(mutexWatershedMergedDataset, "completedSuccessfully", Boolean.class)).orElse(false)
+				&& !overwriteExisting) {
+			System.out.println(String.format("Dataset %s already completed in %s: Skipping", mutexWatershedMergedDataset, outputContainer));
+			return;
+		}
 		runMutexWatersheds(
 				sc,
 				new ZeroExtendedSupplier<A>(new N5ReaderSupplier(affinitiesContainer), affinitiesDataset),
 				new ZeroExtendedSupplier<M>(new N5ReaderSupplier(maskContainer), maskDataset),
 				new ZeroExtendedSupplier<G>(new N5ReaderSupplier(gliaContainer), gliaDataset),
-				new N5WriterSupplier(outputContainer),
+				outputContainerSupplier,
 				mutexWatershedDataset,
 				mutexWatershedRelabeledDataset,
 				mutexWatershedMergedDataset,
@@ -287,6 +316,7 @@ public class SparkMutexWatersheds {
 				blockSize,
 				blocksPerTask,
 				offsets);
+		outputContainerSupplier.get().setAttribute(mutexWatershedMergedDataset, "completedSuccessfully", true);
 	}
 
 	private static <
