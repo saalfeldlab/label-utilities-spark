@@ -1,12 +1,21 @@
 package org.janelia.saalfeldlab.label.spark.watersheds;
 
+import gnu.trove.iterator.TLongLongIterator;
+import gnu.trove.list.TLongList;
+import gnu.trove.list.array.TLongArrayList;
 import gnu.trove.map.TLongLongMap;
+import gnu.trove.map.TLongObjectMap;
 import gnu.trove.map.hash.TLongLongHashMap;
+import gnu.trove.map.hash.TLongObjectHashMap;
+import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
 import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.algorithm.util.unionfind.IntArrayUnionFind;
+import net.imglib2.algorithm.util.unionfind.LongHashMapUnionFind;
+import net.imglib2.algorithm.util.unionfind.UnionFind;
 import net.imglib2.img.array.ArrayImgs;
 import net.imglib2.loops.LoopBuilder;
 import net.imglib2.type.NativeType;
@@ -20,6 +29,7 @@ import net.imglib2.util.ConstantUtils;
 import net.imglib2.util.IntervalIndexer;
 import net.imglib2.util.Intervals;
 import net.imglib2.util.StopWatch;
+import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -35,6 +45,7 @@ import scala.Tuple2;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -50,7 +61,9 @@ public class SparkMutexWatersheds {
 		final String containerPath = "/home/hanslovskyp/workspace/mutex-watershed/mutex-watershed-notebook/sample_A.n5";
 		final String dataset = "affinities";
 		final String outputDataset = "mutex-watershed";
-		final long[] outputSize = Intervals.dimensionsAsLongArray(Views.collapse(N5Utils.<FloatType>open(new N5FSReader(containerPath), dataset)));
+		final String relabeledDataset = "mutex-watershed-relabeled";
+		final String mergedDataset = "mutex-watershed-merged";
+		final long[] outputSize = new long[] {256, 256, 256};//Intervals.dimensionsAsLongArray(Views.collapse(N5Utils.<FloatType>open(new N5FSReader(containerPath), dataset)));
 		final N5WriterSupplier container = new N5WriterSupplier(containerPath);
 
 		final SparkConf conf = new SparkConf().setAppName(SparkMutexWatersheds.class.getName());
@@ -71,12 +84,24 @@ public class SparkMutexWatersheds {
 					(Serializable & Supplier<RandomAccessible<FloatType>>) () -> ConstantUtils.constantRandomAccessible(new FloatType(0.0f), 3),
 					container,
 					outputDataset,
+					relabeledDataset,
+					mergedDataset,
 					outputSize,
 					new int[] {64, 64, 64},
 					new int[] {1, 1, 1},
 					offsets);
-			new N5FSWriter(containerPath).setAttribute(outputDataset, "resolution", new N5FSWriter(containerPath).getAttribute(dataset, "resolution", double[].class));
-			new N5FSWriter(containerPath).setAttribute(outputDataset, "offset", new N5FSWriter(containerPath).getAttribute(dataset, "offset", double[].class));
+			final double[] resolution = container.get().getAttribute(dataset, "resolution", double[].class);
+			if (resolution != null) {
+				container.get().setAttribute(outputDataset, "resolution", resolution);
+				container.get().setAttribute(relabeledDataset, "resolution", resolution);
+				container.get().setAttribute(mergedDataset, "resolution", resolution);
+			}
+			final double[] offset = container.get().getAttribute(dataset, "offset", double[].class);
+			if (offset != null) {
+				container.get().setAttribute(outputDataset, "offset", offset);
+				container.get().setAttribute(relabeledDataset, "offset", offset);
+				container.get().setAttribute(mergedDataset, "offset", offset);
+			}
 			sw.stop();
 			System.out.println(String.format("Ran mutex watersheds in %f seconds", sw.seconds()));
 		}
@@ -92,13 +117,17 @@ public class SparkMutexWatersheds {
 			final Supplier<RandomAccessible<M>> maskSupplier,
 			final Supplier<RandomAccessible<G>> gliaSupplier,
 			final Supplier<N5FSWriter> outputContainer,
-			final String outputDataset,
+			final String mutexWatershedDataset,
+			final String mutexWatershedRelabeledDataset,
+			final String mutexWatershedMergedDataset,
 			final long[] outputSize,
 			final int[] blockSize,
 			final int[] blocksPerTask,
 			final long[]... offsets) throws IOException {
 
-		outputContainer.get().createDataset(outputDataset, outputSize, blockSize, DataType.UINT64, new GzipCompression());
+		outputContainer.get().createDataset(mutexWatershedDataset, outputSize, blockSize, DataType.UINT64, new GzipCompression());
+		outputContainer.get().createDataset(mutexWatershedRelabeledDataset, outputSize, blockSize, DataType.UINT64, new GzipCompression());
+		outputContainer.get().createDataset(mutexWatershedMergedDataset, outputSize, blockSize, DataType.UINT64, new GzipCompression());
 
 		final int[] taskSize = new int[blockSize.length];
 		Arrays.setAll(taskSize, d -> blockSize[d] * blocksPerTask[d]);
@@ -198,13 +227,165 @@ public class SparkMutexWatersheds {
 					final long[] blockOffset = new long[bwo.min.length];
 					Arrays.setAll(blockOffset, d -> bwo.min[d] / blockSize[d]);
 					final DatasetAttributes attributes = new DatasetAttributes(outputSize, blockSize, DataType.UINT64, new GzipCompression());
-					N5Utils.saveBlock(target, outputContainer.get(), outputDataset, attributes, blockOffset);
+					N5Utils.saveBlock(target, outputContainer.get(), mutexWatershedDataset, attributes, blockOffset);
 
-					return new Tuple2<IntervalWithOffset, Long>(bwo, index);
+					return new Tuple2<>(bwo, index);
 				})
 				.collectAsMap();
 
+		long count = 0;
+		final List<Tuple2<IntervalWithOffset, Long>> blocksWithIndexOffsets = new ArrayList<>();
+		for (final IntervalWithOffset block : blocksWithOffsets) {
+			blocksWithIndexOffsets.add(new Tuple2<>(block, count + 1));
+			count += blocksWithCounts.get(block);
+		}
 
+		sc
+				.parallelizePairs(blocksWithIndexOffsets)
+				.foreach(bwio -> {
+					final IntervalWithOffset bwo = bwio._1();
+					final Interval block = new FinalInterval(bwo.min, bwo.max);
+					long index = bwio._2();
+					final TLongLongHashMap mapping = new TLongLongHashMap();
+					mapping.put(0, 0);
+					final RandomAccessibleInterval<UnsignedLongType> labelData = N5Utils.open(outputContainer.get(), mutexWatershedDataset);
+					final RandomAccessibleInterval<UnsignedLongType> relabeled = ArrayImgs.unsignedLongs(Intervals.dimensionsAsLongArray(block));
+					final Cursor<UnsignedLongType> source = Views.flatIterable(Views.interval(labelData, block)).cursor();
+					final Cursor<UnsignedLongType> target = Views.flatIterable(relabeled).cursor();
+					while (source.hasNext()) {
+						final long s = source.next().getIntegerLong();
+						final UnsignedLongType t = target.next();
+						if (!mapping.containsKey(s)) {
+							mapping.put(s, index);
+							++index;
+						}
+						t.setInteger(mapping.get(s));
+					}
+
+					final long[] blockOffset = new long[bwo.min.length];
+					Arrays.setAll(blockOffset, d -> bwo.min[d] / blockSize[d]);
+					final DatasetAttributes attributes = new DatasetAttributes(outputSize, blockSize, DataType.UINT64, new GzipCompression());
+					N5Utils.saveBlock(relabeled, outputContainer.get(), mutexWatershedRelabeledDataset, attributes, blockOffset);
+				});
+
+		final List<Tuple2<long[], long[]>> mappings = sc
+				.parallelize(blocksWithOffsets)
+				.map(bwo -> {
+					final TLongList from = new TLongArrayList();
+					final TLongList to = new TLongArrayList();
+
+					final RandomAccessibleInterval<UnsignedLongType> labelData = N5Utils.open(outputContainer.get(), mutexWatershedRelabeledDataset);
+
+					for (int d = 0; d < labelData.numDimensions(); ++d) {
+						final TLongObjectMap<TLongLongMap> forwardCounts = new TLongObjectHashMap<>();
+						final TLongObjectMap<TLongLongMap> backwardCounts = new TLongObjectHashMap<>();
+
+						final long[] min = bwo.min.clone();
+						final long[] max = bwo.max.clone();
+						min[d] = max[d];
+						if (max[d] == labelData.max(d))
+							continue;
+
+						final RandomAccessibleInterval<UnsignedLongType> slice1 = Views.interval(labelData, min, max);
+						final RandomAccessibleInterval<UnsignedLongType> slice2 = Views.interval(labelData, Intervals.translate(slice1, 1L, d));
+						LoopBuilder
+								.setImages(slice1, slice2)
+								.forEachPixel((s1, s2) -> {
+									final long l1 = s1.getIntegerLong();
+									final long l2 = s2.getIntegerLong();
+									// l1 != l2 unless they are both 0 (or there is a bug)
+									if (l1 != 0 && l2 != 0) {
+										incrementFor(forwardCounts, l1, l2);
+										incrementFor(backwardCounts, l2, l1);
+									}
+								});
+						final TLongLongMap forwardArgmax = argMaxes(forwardCounts);
+						final TLongLongMap backwardArgmax = argMaxes(backwardCounts);
+
+						forwardArgmax.forEachEntry((key, argMax) -> {
+							if (backwardArgmax.get(argMax) == key) {
+								from.add(key);
+								to.add(argMax);
+							}
+							return true;
+						});
+					}
+
+					return new Tuple2<>(from.toArray(), to.toArray());
+				})
+				.collect();
+
+		final TLongLongHashMap parents = new TLongLongHashMap();
+		final UnionFind uf = new LongHashMapUnionFind(parents, 0, Long::compare);
+
+		mappings.forEach(p -> {
+			final long[] keys = p._1();
+			final long[] values = p._2();
+			for (int i = 0; i < keys.length; ++i) {
+				uf.join(uf.findRoot(keys[i]), uf.findRoot(values[i]));
+			}
+		});
+
+		parents.forEachKey(key -> {
+			uf.findRoot(key);
+			return true;
+		});
+
+		final long[] mappingKeys = parents.keys();
+		final long[] mappingValues = parents.values();
+
+		sc
+				.parallelize(blocksWithOffsets)
+				.foreach(bwo -> {
+					final Interval block = new FinalInterval(bwo.min, bwo.max);
+					final TLongLongMap mapping = new TLongLongHashMap(mappingKeys, mappingValues);
+					final RandomAccessibleInterval<UnsignedLongType> labelData = N5Utils.open(outputContainer.get(), mutexWatershedRelabeledDataset);
+					final RandomAccessibleInterval<UnsignedLongType> remapped = ArrayImgs.unsignedLongs(Intervals.dimensionsAsLongArray(block));
+
+					LoopBuilder
+							.setImages(Views.interval(labelData, block), remapped)
+							.forEachPixel((s, t) -> {
+								final long k = s.getIntegerLong();
+								t.setInteger(mapping.containsKey(k) ? mapping.get(k) : k);
+							});
+
+
+					final long[] blockOffset = new long[bwo.min.length];
+					Arrays.setAll(blockOffset, d -> bwo.min[d] / blockSize[d]);
+					final DatasetAttributes attributes = new DatasetAttributes(outputSize, blockSize, DataType.UINT64, new GzipCompression());
+					N5Utils.saveBlock(remapped, outputContainer.get(), mutexWatershedMergedDataset, attributes, blockOffset);
+
+				});
+
+
+	}
+
+	private static TLongLongMap argMaxes(final TLongObjectMap<TLongLongMap> counts) {
+		final TLongLongMap argMaxes = new TLongLongHashMap();
+		counts.forEachEntry((key, value) -> {
+			long argMax = -1;
+			long maxCount = Long.MIN_VALUE;
+			final TLongLongIterator iterator = value.iterator();
+			while (iterator.hasNext()) {
+				iterator.advance();
+				final long count = iterator.value();
+				if (count > maxCount) {
+					maxCount = count;
+					argMax = iterator.key();
+				}
+			}
+			if (maxCount > 0)
+				argMaxes.put(key, argMax);
+			return true;
+		});
+		return argMaxes;
+	}
+
+	private static void incrementFor(final TLongObjectMap<TLongLongMap> counts, final long from, final long to) {
+		if (!counts.containsKey(from))
+			counts.put(from, new TLongLongHashMap());
+		final TLongLongMap toCounts = counts.get(from);
+		toCounts.put(to, toCounts.get(to) + 1);
 	}
 
 	private static long squaredSum(long... values) {
