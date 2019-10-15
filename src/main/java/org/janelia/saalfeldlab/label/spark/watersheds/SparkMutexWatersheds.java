@@ -41,6 +41,7 @@ import org.janelia.saalfeldlab.n5.N5FSReader;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
+import picocli.CommandLine;
 import scala.Tuple2;
 
 import java.io.IOException;
@@ -50,11 +51,126 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class SparkMutexWatersheds {
+
+	@CommandLine.Command(name = "spark-mutex-watersheds-cremi")
+	public static class CREMI implements Callable<Integer> {
+
+		@CommandLine.Option(names = {"--samples", "-s"}, split = ",", defaultValue = "A,B,C,0,1,2", showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+		String[] samples = null;
+
+		@CommandLine.Option(names = {"--setups", "-S"}, split = ",", defaultValue = "0,3", showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+		int[] setups = null;
+
+		@CommandLine.Option(names = {"--iterations", "-i"}, split = ",", defaultValue = "500000", showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+		int[] iterations = null;
+
+		@CommandLine.Option(names = {"--block-size", "-b"}, split = ",", defaultValue = "64,64,64", showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+		int[] blockSize = null;
+
+		@CommandLine.Option(names = {"--blocks-per-task", "-p"}, split = ",", defaultValue = "1,1,1", showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+		int[] blocksPerTask = null;
+
+		// TODO expose threshold and use in experiments
+//		@CommandLine.Option(names = {"--threshold", "-t"}, split = ",")
+		Double threshold = null;
+
+
+
+		public static void main(String... args) {
+			new CommandLine(new CREMI()).execute(args);
+		}
+
+		@Override
+		public Integer call() throws IOException {
+
+
+			final SparkConf conf = new SparkConf().setAppName(CREMI.class.getName());
+			try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
+				for (final int iteration : iterations) {
+					for (final int setup : setups) {
+						final String basePath = basePathFor(setup, iteration);
+						for (final String sample: samples) {
+							final String containerPath = containerPathFor(sample);
+							final String affinitiesDataset = affinitiesFrom(basePath);
+							final long[] outputSize = Intervals.dimensionsAsLongArray(Views.collapse((RandomAccessibleInterval) N5Utils.open(new N5FSReader(containerPath), affinitiesDataset)));
+							final StopWatch sw = StopWatch.createAndStart();
+							runMutexWatersheds(
+									sc,
+									containerPath,
+									affinitiesDataset,
+									null, // TODO mask dataset
+									null, // TODO glia dataset
+									mutexWatershedDatasetFrom(threshold),
+									mutexWatershedRelabeledDatasetFrom(threshold),
+									mutexWatershedMergedDatasetFrom(threshold),
+									outputSize,
+									blockSize,
+									blocksPerTask,
+									OFFSETS);
+							sw.stop();
+							System.out.println(String.format(
+									"Ran mutex watersheds for CREMI sample=%s setup=%d iteration=%d in %s.",
+									sample,
+									setup,
+									iteration,
+									StopWatch.secondsToString(sw.seconds())));
+						}
+					}
+				}
+			}
+			return 0;
+		}
+
+		private static final String CONTAINER_PATTERN = "/nrs/saalfeld/hanslovskyp/experiments/quasi-isotropic-predictions/affinities-glia/neuron_ids-unlabeled-unmask-background/predictions/CREMI/sample_%s.n5";
+
+		private static final String BASE_PATH_PATTERN = "volumes/predictions/neuron_ids-unlabeled-unmask-background/%d/%d";
+
+
+		private static final long[][] OFFSETS = {
+				{-1, 0, 0}, {-2, 0, 0}, {-5, 0, 0}, {-10, 0, 0},
+				{0, -1, 0}, {0, -2, 0}, {0, -5, 0}, {0, -10, 0},
+				{0, 0, -1}, {0, 0, -2}, {0, 0, -5}, {0, 0, -10}};
+
+		private static String containerPathFor(final String sample) {
+			return String.format(CONTAINER_PATTERN, sample);
+		}
+
+		private static String basePathFor(final int setup, final int iteration) {
+			return String.format(BASE_PATH_PATTERN, setup, iteration);
+		}
+
+		private static String datasetFrom(final String basePath, final String datasetName) {
+			return String.format("%s/%s", basePath, datasetName);
+		}
+
+		private static String affinitiesFrom(final String basePath) {
+			return datasetFrom(basePath, "affinities");
+		}
+
+		private static String gliaFrom(final String basePath) {
+			return datasetFrom(basePath, "glia");
+		}
+
+		private static String mutexWatershedDatasetFrom(final Double threshold) {
+			return (threshold == null)
+					? "mutex-watershed"
+					: String.format("mutex-watershed-%f", threshold);
+		}
+
+		private static String mutexWatershedRelabeledDatasetFrom(final Double threshold) {
+			return String.format("%s-relabeled", mutexWatershedDatasetFrom(threshold));
+		}
+
+		private static String mutexWatershedMergedDatasetFrom(final Double threshold) {
+			return String.format("%s-merged", mutexWatershedDatasetFrom(threshold));
+		}
+	}
 
 	public static void main(String... args) throws IOException {
 
@@ -106,6 +222,71 @@ public class SparkMutexWatersheds {
 			System.out.println(String.format("Ran mutex watersheds in %f seconds", sw.seconds()));
 		}
 
+	}
+
+	private static void runMutexWatersheds(
+			final JavaSparkContext sc,
+			final String container,
+			final String affinitiesDataset,
+			final String maskDataset,
+			final String gliaDataset,
+			final String mutexWatershedDataset,
+			final String mutexWatershedRelabeledDataset,
+			final String mutexWatershedMergedDataset,
+			final long[] outputSize,
+			final int[] blockSize,
+			final int[] blocksPerTask,
+			final long[]... offsets) throws IOException {
+		runMutexWatersheds(
+				sc,
+				container,
+				container,
+				container,
+				container,
+				affinitiesDataset,
+				maskDataset,
+				gliaDataset,
+				mutexWatershedDataset,
+				mutexWatershedRelabeledDataset,
+				mutexWatershedMergedDataset,
+				outputSize,
+				blockSize,
+				blocksPerTask,
+				offsets);
+	}
+
+	private static <
+			A extends NativeType<A> & RealType<A>,
+			M extends NativeType<M> & IntegerType<M>,
+			G extends NativeType<G> & RealType<G>> void runMutexWatersheds(
+			final JavaSparkContext sc,
+			final String affinitiesContainer,
+			final String maskContainer,
+			final String gliaContainer,
+			final String outputContainer,
+			final String affinitiesDataset,
+			final String maskDataset,
+			final String gliaDataset,
+			final String mutexWatershedDataset,
+			final String mutexWatershedRelabeledDataset,
+			final String mutexWatershedMergedDataset,
+			final long[] outputSize,
+			final int[] blockSize,
+			final int[] blocksPerTask,
+			final long[]... offsets) throws IOException {
+		runMutexWatersheds(
+				sc,
+				new ZeroExtendedSupplier<A>(new N5ReaderSupplier(affinitiesContainer), affinitiesDataset),
+				new ZeroExtendedSupplier<M>(new N5ReaderSupplier(maskContainer), maskDataset),
+				new ZeroExtendedSupplier<G>(new N5ReaderSupplier(gliaContainer), gliaDataset),
+				new N5WriterSupplier(outputContainer),
+				mutexWatershedDataset,
+				mutexWatershedRelabeledDataset,
+				mutexWatershedMergedDataset,
+				outputSize,
+				blockSize,
+				blocksPerTask,
+				offsets);
 	}
 
 	private static <
@@ -418,6 +599,24 @@ public class SparkMutexWatersheds {
 		public N5FSWriter get() {
 			try {
 				return new N5FSWriter(containerPath);
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+	}
+
+	private static class N5ReaderSupplier implements SerializableSupplier<N5FSReader> {
+
+		private final String containerPath;
+
+		private N5ReaderSupplier(final String containerPath) {
+			this.containerPath = containerPath;
+		}
+
+		@Override
+		public N5FSReader get() {
+			try {
+				return new N5FSReader(containerPath);
 			} catch (IOException e) {
 				throw new RuntimeException(e);
 			}
