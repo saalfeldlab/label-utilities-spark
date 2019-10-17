@@ -110,9 +110,9 @@ public class LabelToBlockMapping
 	{
 		final N5Reader reader = N5Helpers.n5Reader( inputN5, N5Helpers.DEFAULT_BLOCK_SIZE );
 		final N5FSWriter writer = new N5FSWriter(outputN5, new GsonBuilder().registerTypeHierarchyAdapter(LabelBlockLookup.class, LabelBlockLookupAdapter.getJsonAdapter()));
-		writer.createGroup(enclosingGroup);
+		writer.createGroup(relativeLookupGroup == null ? enclosingGroup : enclosingGroup + "/" + relativeLookupGroup);
 		final String pattern = relativeLookupGroup == null ? "s%d" : relativeLookupGroup + "/s%d";
-		final LabelBlockLookupN5Supplier lookupSupplier = new LabelBlockLookupN5Supplier(outputN5, relativeLookupGroup, pattern);
+		final LabelBlockLookupN5Supplier lookupSupplier = new LabelBlockLookupN5Supplier(outputN5, enclosingGroup, pattern);
 		writer.setAttribute(enclosingGroup, "labelBlockLookup", lookupSupplier.get() );
 
 		if ( N5Helpers.isMultiScale( reader, inputDataset ) )
@@ -121,7 +121,8 @@ public class LabelToBlockMapping
 			for ( int level = 0; level < sortedScaleDirs.length; ++level )
 			{
 				final String scaleDataset = sortedScaleDirs[ level ];
-				writer.createDataset( enclosingGroup + "/" + scaleDataset, new long[] { Long.MAX_VALUE }, new int[] { stepSize }, DataType.INT8, new GzipCompression() );
+//				writer.createDataset( enclosingGroup + "/" + scaleDataset, new long[] { Long.MAX_VALUE }, new int[] { stepSize }, DataType.INT8, new GzipCompression() );
+				writer.createDataset(String.format(enclosingGroup + "/" + pattern, level), new long[] { Long.MAX_VALUE }, new int[] { stepSize }, DataType.INT8, new GzipCompression());
 				LOG.info( "Creating mapping for scale dataset {} in group {} of n5 container {} at target {}", scaleDataset, inputDataset, inputN5, enclosingGroup );
 				createMappingN5(
 						sc,
