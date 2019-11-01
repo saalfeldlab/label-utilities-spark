@@ -1,9 +1,5 @@
 package org.janelia.saalfeldlab.label.spark.uniquelabels;
 
-import java.io.IOException;
-import java.lang.invoke.MethodHandles;
-import java.util.concurrent.Callable;
-
 import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -13,6 +9,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 import picocli.CommandLine.Parameters;
+
+import java.io.IOException;
+import java.lang.invoke.MethodHandles;
+import java.util.concurrent.Callable;
 
 public class LabelToBlockMappingN5
 {
@@ -56,7 +56,8 @@ public class LabelToBlockMappingN5
 
 			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
 			{
-				LabelToBlockMapping.createMappingWithMultiscaleCheckN5(sc, inputN5, inputDataset, outputN5, outputGroup, n5StepSize);
+				// TODO what to do about relativeLookupGroup?
+				LabelToBlockMapping.createMappingWithMultiscaleCheckN5(sc, inputN5, inputDataset, outputN5, outputGroup, null, n5StepSize);
 			}
 
 			final long endTime = System.currentTimeMillis();
