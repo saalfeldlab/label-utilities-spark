@@ -315,7 +315,11 @@ public class LabelToBlockMapping
 		public LabelBlockLookupFromN5Relative get()
 		{
 			final LabelBlockLookupFromN5Relative lookup = new LabelBlockLookupFromN5Relative(pattern);
-			lookup.setRelativeTo(root, group);
+			try {
+				lookup.setRelativeTo(new N5FSWriter(root), group);
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
 			return lookup;
 		}
 	}
