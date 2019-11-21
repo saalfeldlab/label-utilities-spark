@@ -107,7 +107,7 @@
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>imglib2-mutex-watershed</artifactId>
-			<version>0.1.2-SNAPSHOT</version>
+			<version>0.1.2</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.spark</groupId>
