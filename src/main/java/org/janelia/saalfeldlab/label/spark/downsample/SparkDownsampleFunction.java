@@ -3,6 +3,7 @@ package org.janelia.saalfeldlab.label.spark.downsample;
 import java.util.Arrays;
 import java.util.List;
 
+import net.imglib2.img.array.ArrayImg;
 import org.apache.spark.api.java.function.VoidFunction;
 import org.janelia.saalfeldlab.n5.ByteArrayDataBlock;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
@@ -134,8 +135,24 @@ public class SparkDownsampleFunction implements VoidFunction< Interval >
 		}
 
 		final ByteArrayDataBlock dataBlock = new ByteArrayDataBlock( blockSizeInTarget, writeLocation, bytes );
-		writer.writeBlock( outputDatasetName, writerAttributes, dataBlock );
 
+		// Empty blocks will not be written out.
+		// Delete blocks to avoid remnant blocks if overwriting.
+		writer.deleteBlock( outputDatasetName, writeLocation );
+		boolean hasForeground = false;
+		final LabelMultisetType lmt = new LabelMultisetType( downscaledCell );
+		final int numElements = ( int ) Intervals.numElements( interval );
+		for ( int i = 0; i < numElements && !hasForeground; ++i ) {
+			lmt.updateIndex( i );
+			for ( Entry< Label > entry : lmt.entrySet() )
+				if ( entry.getElement().id() != 0 ) {
+					hasForeground = true;
+					break;
+				}
+		}
+		downscaledCell.getArrayLength();
+		if ( hasForeground )
+			writer.writeBlock( outputDatasetName, writerAttributes, dataBlock );
 	}
 
 	public static CachedCellImg< LabelMultisetType, VolatileLabelMultisetArray > getSource(
