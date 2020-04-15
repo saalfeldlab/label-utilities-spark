@@ -1,7 +1,6 @@
 package org.janelia.saalfeldlab.label.spark.convert;
 
 import java.io.IOException;
-import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -180,6 +179,13 @@ public class ConvertToLabelMultisetType
 		img.dimensions( dimensions );
 
 		final N5Writer writer = N5Helpers.n5Writer( outputGroupName, blockSize );
+		final boolean outputDatasetExisted = writer.datasetExists( outputDatasetName );
+		if ( outputDatasetExisted )
+		{
+			final int[] existingBlockSize = writer.getDatasetAttributes( outputDatasetName ).getBlockSize();
+			if ( !Arrays.equals( blockSize, existingBlockSize ) )
+				throw new RuntimeException( "Cannot overwrite existing dataset when the block sizes are not the same." );
+		}
 		writer.createDataset( outputDatasetName, dimensions, blockSize, DataType.UINT8, compression );
 		writer.setAttribute( outputDatasetName, LABEL_MULTISETTYPE_KEY, true );
 		for ( final Entry< String, Class< ? > > entry : attributeNames.entrySet() )
@@ -223,34 +229,21 @@ public class ConvertToLabelMultisetType
 					}
 					final RandomAccessibleInterval< LabelMultisetType > converted = Converters.convert( blockImg, converter, type );
 
-					N5LabelMultisets.saveLabelMultisetBlock(
-							converted,
-							N5Helpers.n5Writer( outputGroupName, blockSize ),
-							outputDatasetName,
-							computeGridOffset( interval, blockSize ) // TODO: this parameter can be omitted with next release of n5-imglib2
-						);
+
+					final N5Writer localWriter = N5Helpers.n5Writer( outputGroupName, blockSize );
+
+					if ( outputDatasetExisted )
+					{
+						// Empty blocks will not be written out. Delete blocks to avoid remnant blocks if overwriting.
+						N5Utils.deleteBlock( converted, localWriter, outputDatasetName );
+					}
+
+					N5LabelMultisets.saveLabelMultisetNonEmptyBlock( converted, localWriter, outputDatasetName );
 
 					return blockMaxId;
 				} )
-				.max( new LongComparator() );
+				.max( Comparator.naturalOrder() );
 
 		writer.setAttribute( outputDatasetName, MAX_ID_KEY, maxId );
-	}
-
-	private static long[] computeGridOffset( final Interval source, final int[] blockSize )
-	{
-		// FIXME: source and blockSize should have the same dimensionality, but this is not the case for cremi's annotations that are 1D datasets
-		final long[] gridOffset = new long[ Math.min( source.numDimensions(), blockSize.length ) ];
-		Arrays.setAll(gridOffset, d -> source.min(d) / blockSize[d]);
-		return gridOffset;
-	}
-
-	private static final class LongComparator implements Comparator< Long >, Serializable
-	{
-		@Override
-		public int compare( final Long o1, final Long o2 )
-		{
-			return Long.compare( o1, o2 );
-		}
 	}
 }
