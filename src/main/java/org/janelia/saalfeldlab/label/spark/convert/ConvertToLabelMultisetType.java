@@ -1,7 +1,6 @@
 package org.janelia.saalfeldlab.label.spark.convert;
 
 import java.io.IOException;
-import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -243,17 +242,8 @@ public class ConvertToLabelMultisetType
 
 					return blockMaxId;
 				} )
-				.max( new LongComparator() );
+				.max( Comparator.naturalOrder() );
 
 		writer.setAttribute( outputDatasetName, MAX_ID_KEY, maxId );
-	}
-
-	private static final class LongComparator implements Comparator< Long >, Serializable
-	{
-		@Override
-		public int compare( final Long o1, final Long o2 )
-		{
-			return Long.compare( o1, o2 );
-		}
 	}
 }
