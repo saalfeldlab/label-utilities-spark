@@ -180,6 +180,7 @@ public class ConvertToLabelMultisetType
 		img.dimensions( dimensions );
 
 		final N5Writer writer = N5Helpers.n5Writer( outputGroupName, blockSize );
+		final boolean outputDatasetExisted = writer.datasetExists( outputDatasetName );
 		writer.createDataset( outputDatasetName, dimensions, blockSize, DataType.UINT8, compression );
 		writer.setAttribute( outputDatasetName, LABEL_MULTISETTYPE_KEY, true );
 		for ( final Entry< String, Class< ? > > entry : attributeNames.entrySet() )
@@ -225,16 +226,14 @@ public class ConvertToLabelMultisetType
 
 
 					final N5Writer localWriter = N5Helpers.n5Writer( outputGroupName, blockSize );
-					final long[] gridOffset = computeGridOffset( interval, blockSize );
-					// Empty blocks will not be written out.
-					// Delete blocks to avoid remnant blocks if overwriting.
-					deleteBlock( converted, localWriter, outputDatasetName, blockSize, gridOffset );
-					N5LabelMultisets.saveLabelMultisetNonEmptyBlock(
-							converted,
-							localWriter,
-							outputDatasetName,
-							gridOffset // TODO: this parameter can be omitted with next release of n5-imglib2
-						);
+
+					if ( outputDatasetExisted )
+					{
+						// Empty blocks will not be written out. Delete blocks to avoid remnant blocks if overwriting.
+						N5Utils.deleteBlock( converted, localWriter, outputDatasetName );
+					}
+
+					N5LabelMultisets.saveLabelMultisetNonEmptyBlock( converted, localWriter, outputDatasetName );
 
 					return blockMaxId;
 				} )
@@ -243,70 +242,12 @@ public class ConvertToLabelMultisetType
 		writer.setAttribute( outputDatasetName, MAX_ID_KEY, maxId );
 	}
 
-	private static long[] computeGridOffset( final Interval source, final int[] blockSize )
-	{
-		// FIXME: source and blockSize should have the same dimensionality, but this is not the case for cremi's annotations that are 1D datasets
-		final long[] gridOffset = new long[ Math.min( source.numDimensions(), blockSize.length ) ];
-		Arrays.setAll(gridOffset, d -> source.min(d) / blockSize[d]);
-		return gridOffset;
-	}
-
 	private static final class LongComparator implements Comparator< Long >, Serializable
 	{
 		@Override
 		public int compare( final Long o1, final Long o2 )
 		{
 			return Long.compare( o1, o2 );
-		}
-	}
-
-	private static void cropBlockDimensions(
-			final long[] max,
-			final long[] offset,
-			final long[] gridOffset,
-			final int[] blockDimensions,
-			final long[] croppedBlockDimensions,
-			final int[] intCroppedBlockDimensions,
-			final long[] gridPosition) {
-
-		for (int d = 0; d < max.length; ++d) {
-			croppedBlockDimensions[ d ] = Math.min( blockDimensions[ d ], max[ d ] - offset[ d ] + 1);
-			intCroppedBlockDimensions[ d ] = ( int ) croppedBlockDimensions[ d ];
-			gridPosition[ d ] = offset[ d ] / blockDimensions[ d ] + gridOffset[ d ];
-		}
-	}
-
-	private static final void deleteBlock(
-			final Interval interval,
-			final N5Writer n5,
-			final String dataset,
-			final int[] blockSize,
-			final long[] gridOffset ) throws IOException {
-
-		final Interval zeroMinInterval = new FinalInterval( Intervals.dimensionsAsLongArray( interval ) );
-		final int n = zeroMinInterval.numDimensions();
-		final long[] max = Intervals.maxAsLongArray( zeroMinInterval );
-		final long[] offset = new long[ n ];
-		final long[] gridPosition = new long[ n ];
-		final int[] intCroppedBlockSize = new int[ n ];
-		final long[] longCroppedBlockSize = new long[ n ];
-		for ( int d = 0; d < n; ) {
-			cropBlockDimensions(
-					max,
-					offset,
-					gridOffset,
-					blockSize,
-					longCroppedBlockSize,
-					intCroppedBlockSize,
-					gridPosition );
-			n5.deleteBlock( dataset, gridPosition );
-			for ( d = 0; d < n; ++d ) {
-				offset[ d ] += blockSize[ d ];
-				if ( offset[ d ] <= max[ d ] )
-					break;
-				else
-					offset[ d ] = 0;
-			}
 		}
 	}
 }
