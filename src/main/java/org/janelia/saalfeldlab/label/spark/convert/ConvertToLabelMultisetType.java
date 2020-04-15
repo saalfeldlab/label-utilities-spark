@@ -181,6 +181,12 @@ public class ConvertToLabelMultisetType
 
 		final N5Writer writer = N5Helpers.n5Writer( outputGroupName, blockSize );
 		final boolean outputDatasetExisted = writer.datasetExists( outputDatasetName );
+		if ( outputDatasetExisted )
+		{
+			final int[] existingBlockSize = writer.getDatasetAttributes( outputDatasetName ).getBlockSize();
+			if ( !Arrays.equals( blockSize, existingBlockSize ) )
+				throw new RuntimeException( "Cannot overwrite existing dataset when the block sizes are not the same." );
+		}
 		writer.createDataset( outputDatasetName, dimensions, blockSize, DataType.UINT8, compression );
 		writer.setAttribute( outputDatasetName, LABEL_MULTISETTYPE_KEY, true );
 		for ( final Entry< String, Class< ? > > entry : attributeNames.entrySet() )
