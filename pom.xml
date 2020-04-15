@@ -129,31 +129,22 @@
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>n5</artifactId>
-			<version>2.2.0-SNAPSHOT</version>
-
-			<!-- can be removed once new n5 is released -->
-			<exclusions>
-				<exclusion>
-					<groupId>net.jpountz.lz4</groupId>
-					<artifactId>lz4</artifactId>
-				</exclusion>
-			</exclusions>
-
+			<version>2.2.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>n5-imglib2</artifactId>
-			<version>3.3.0</version>
+			<version>3.5.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>n5-hdf5</artifactId>
-			<version>1.0.3</version>
+			<version>1.0.4</version>
 		</dependency>
 		<dependency>
 			<groupId>net.imglib2</groupId>
 			<artifactId>imglib2-label-multisets</artifactId>
-			<version>0.8.1</version>
+			<version>0.9.0</version>
 		</dependency>
 		<dependency>
 			<groupId>info.picocli</groupId>
@@ -177,18 +168,6 @@
 			<scope>test</scope>
 		</dependency>
 
-		<!-- these can be removed once pom-scijava 26.0.0 is released -->
-		<dependency>
-			<groupId>org.slf4j</groupId>
-			<artifactId>jcl-over-slf4j</artifactId>
-			<version>1.7.25</version>
-		</dependency>
-		<dependency>
-			<groupId>org.slf4j</groupId>
-			<artifactId>slf4j-log4j12</artifactId>
-			<version>1.7.25</version>
-		</dependency>
-
 	</dependencies>
 
 	<profiles>
@@ -199,7 +178,7 @@
 					<plugin>
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-shade-plugin</artifactId>
-						<version>3.1.0</version>
+						<version>3.2.1</version>
 						<configuration>
 							<filters>
 								<filter>
@@ -257,7 +236,7 @@
 					<plugin>
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-shade-plugin</artifactId>
-						<version>3.1.0</version>
+						<version>3.2.1</version>
 						<configuration>
 							<filters>
 								<filter>
