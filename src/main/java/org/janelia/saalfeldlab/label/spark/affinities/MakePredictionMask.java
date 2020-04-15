@@ -1,16 +1,14 @@
 package org.janelia.saalfeldlab.label.spark.affinities;
 
 import com.google.gson.annotations.Expose;
-import net.imglib2.FinalInterval;
-import net.imglib2.FinalRealInterval;
-import net.imglib2.Interval;
-import net.imglib2.RandomAccessible;
+import net.imglib2.*;
 import net.imglib2.algorithm.util.Grids;
 import net.imglib2.converter.Converters;
 import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgs;
 import net.imglib2.img.basictypeaccess.array.ByteArray;
 import net.imglib2.realtransform.AffineTransform3D;
+import net.imglib2.type.numeric.IntegerType;
 import net.imglib2.type.numeric.integer.UnsignedByteType;
 import net.imglib2.util.ConstantUtils;
 import net.imglib2.util.Intervals;
@@ -18,11 +16,7 @@ import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.janelia.saalfeldlab.n5.DataType;
-import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
-import org.janelia.saalfeldlab.n5.N5FSReader;
-import org.janelia.saalfeldlab.n5.N5Writer;
+import org.janelia.saalfeldlab.n5.*;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -389,7 +383,9 @@ public class MakePredictionMask {
 		@Override
 		public RandomAccessible<UnsignedByteType> get() {
 			try {
-				return Views.extendValue(Converters.convert(N5Utils.<UnsignedByteType>open(n5.get(), dataset), (s, t) -> t.setInteger(s.getIntegerLong()), new UnsignedByteType()), new UnsignedByteType(0));
+				final RandomAccessibleInterval<IntegerType<?>> img = (RandomAccessibleInterval) N5Utils.open(n5.get(), dataset);
+				final RandomAccessibleInterval<UnsignedByteType> convertedImg = Converters.convert(img, (s, t) -> t.setInteger(s.getIntegerLong()), new UnsignedByteType());
+				return Views.extendValue(convertedImg, new UnsignedByteType(0));
 			} catch (IOException e) {
 				throw new RuntimeException(e);
 			}
