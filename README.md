@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/saalfeldlab/label-utilities-spark.svg?branch=master)](https://travis-ci.org/saalfeldlab/label-utilities-spark)
+[![Build Status](https://github.com/saalfeldlab/label-utilities-spark/actions/workflows/build-main.yml/badge.svg)](https://github.com/saalfeldlab/label-utilities-spark/actions/workflows/build-main.yml)
 
 # Spark Utilities for Label Data
 
