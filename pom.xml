@@ -80,7 +80,7 @@
 		<license.copyrightOwners>Stephan Saalfeld</license.copyrightOwners>
 
 		<!-- NB: Deploy releases to the SciJava Maven repository. -->
-		<releaseProfiles>deploy-to-scijava</releaseProfiles>
+		<releaseProfiles>sign,deploy-to-scijava</releaseProfiles>
 		<package-name>org.janelia.saalfeldlab.label.spark</package-name>
 
 		<imglib2-cache.version>1.0.0-beta-13</imglib2-cache.version>
