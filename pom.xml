@@ -4,7 +4,7 @@
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
-		<version>27.0.1</version>
+		<version>31.1.0</version>
 	</parent>
 
 	<groupId>org.janelia.saalfeldlab</groupId>
@@ -111,12 +111,13 @@
 		</dependency>
 		<dependency>
 			<groupId>org.apache.spark</groupId>
-			<artifactId>spark-core_2.11</artifactId>
+			<artifactId>spark-core_2.12</artifactId>
+			<version>3.2.1</version>
 		</dependency>
 		<dependency>
 			<groupId>net.imglib2</groupId>
 			<artifactId>imglib2</artifactId>
-			<version>5.8.0</version>
+			<version>5.13.0</version>
 		</dependency>
 		<dependency>
 			<groupId>net.imglib2</groupId>
@@ -134,7 +135,7 @@
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>n5-imglib2</artifactId>
-			<version>3.5.0</version>
+			<version>4.3.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
@@ -149,16 +150,22 @@
 		<dependency>
 			<groupId>info.picocli</groupId>
 			<artifactId>picocli</artifactId>
-			<version>4.0.4</version>
+			<version>4.6.3</version>
 		</dependency>
 		<dependency>
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-api</artifactId>
+			<version>1.7.36</version>
 		</dependency>
 		<dependency>
 			<groupId>com.pivovarit</groupId>
 			<artifactId>throwing-function</artifactId>
-			<version>1.5.0</version>
+			<version>1.5.1</version>
+		</dependency>
+		<dependency>
+			<groupId>com.fasterxml.jackson.core</groupId>
+			<artifactId>jackson-databind</artifactId>
+			<version>2.12.5</version>
 		</dependency>
 
 		<!-- test -->
@@ -178,7 +185,7 @@
 					<plugin>
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-shade-plugin</artifactId>
-						<version>3.2.1</version>
+						<version>3.2.4</version>
 						<configuration>
 							<filters>
 								<filter>
@@ -227,7 +234,8 @@
 			<dependencies>
 				<dependency>
 					<groupId>org.apache.spark</groupId>
-					<artifactId>spark-core_2.11</artifactId>
+					<artifactId>spark-core_2.12</artifactId>
+					<version>3.2.1</version>
 					<scope>provided</scope>
 				</dependency>
 			</dependencies>
@@ -236,7 +244,7 @@
 					<plugin>
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-shade-plugin</artifactId>
-						<version>3.2.1</version>
+						<version>3.2.4</version>
 						<configuration>
 							<filters>
 								<filter>

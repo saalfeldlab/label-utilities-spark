@@ -22,7 +22,7 @@ import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.spark_project.guava.io.Files;
+import org.sparkproject.guava.io.Files;
 import picocli.CommandLine;
 import picocli.CommandLine.Parameters;
 import scala.Tuple2;
