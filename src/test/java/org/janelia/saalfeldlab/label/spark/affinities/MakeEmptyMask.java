@@ -20,6 +20,7 @@ import java.util.concurrent.Executors;
 public class MakeEmptyMask {
 
 	public static void main(String[] args) throws IOException, ExecutionException, InterruptedException {
+
 		final N5FSWriter container = new N5FSWriter("/groups/saalfeld/home/hanslovskyp/data/cremi/sample_A+_padded_20160601-bs=64.n5");
 		final String rawPath = "volumes/raw/data/s0";
 		final String maskPath = "volumes/masks/raw";
@@ -33,14 +34,13 @@ public class MakeEmptyMask {
 				new GzipCompression());
 
 		container.createDataset(maskPath, maskAttributes);
-		container.setAttribute(maskPath, "value_range", new double[] {0.0, 1.0});
-		container.setAttribute(maskPath, "resolution", new double[] {4, 4, 40});
+		container.setAttribute(maskPath, "value_range", new double[]{0.0, 1.0});
+		container.setAttribute(maskPath, "resolution", new double[]{4, 4, 40});
 
 		final long[] center = new long[maskAttributes.getNumDimensions()];
 		Arrays.setAll(center, d -> (raw.min(d) + raw.max(d)) / 2);
 		final long[] radius = center.clone();
 		final double[] doubleCenterSquared = Arrays.stream(center).asDoubleStream().map(d -> d * d).toArray();
-
 
 		final RandomAccessible<UnsignedByteType> mask = new FunctionRandomAccessible<>(
 				center.length,
@@ -66,8 +66,6 @@ public class MakeEmptyMask {
 				es);
 
 		es.shutdown();
-
-
 
 	}
 

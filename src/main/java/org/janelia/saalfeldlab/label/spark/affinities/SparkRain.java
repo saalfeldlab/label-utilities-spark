@@ -10,7 +10,6 @@ import kotlin.Pair;
 import net.imglib2.Cursor;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
-import net.imglib2.IterableInterval;
 import net.imglib2.Point;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.gauss3.Gauss3;
@@ -38,7 +37,7 @@ import net.imglib2.util.Intervals;
 import net.imglib2.util.Util;
 import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
-import org.apache.commons.lang.builder.ToStringBuilder;
+import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.PairFunction;
@@ -103,20 +102,24 @@ public class SparkRain {
 		private final long[] offset;
 
 		public Offset(final int channelIndex, final long... offset) {
+
 			this.channelIndex = channelIndex;
 			this.offset = offset;
 		}
 
 		public long[] offset() {
+
 			return offset.clone();
 		}
 
 		public int channelIndex() {
+
 			return channelIndex;
 		}
 
 		@Override
 		public String toString() {
+
 			return new ToStringBuilder(this)
 					.append("channelIndex", channelIndex)
 					.append("offset", Arrays.toString(offset))
@@ -124,6 +127,7 @@ public class SparkRain {
 		}
 
 		public static Offset parseOffset(final String representation) {
+
 			final String[] split = representation.split(":");
 			return new Offset(
 					split.length > 1 ? Integer.parseInt(split[1]) : -1,
@@ -134,6 +138,7 @@ public class SparkRain {
 
 			@Override
 			public Offset convert(String s) {
+
 				return Offset.parseOffset(s);
 			}
 		}
@@ -190,11 +195,11 @@ public class SparkRain {
 		int[] blockSize = {64, 64, 64};
 
 		@Expose
-		@CommandLine.Option(names = "--blocks-per-task", paramLabel = "BLOCKS_PER_TASK", description = "How many blocks to combine for watersheds/connected components (one value per dimension)", split=",")
+		@CommandLine.Option(names = "--blocks-per-task", paramLabel = "BLOCKS_PER_TASK", description = "How many blocks to combine for watersheds/connected components (one value per dimension)", split = ",")
 		int[] blocksPerTask = {1, 1, 1};
 
 		@Expose
-		@CommandLine.Option(names = "--halo", paramLabel = "HALO", description = "Include halo region to run connected components/watersheds", split=",")
+		@CommandLine.Option(names = "--halo", paramLabel = "HALO", description = "Include halo region to run connected components/watersheds", split = ",")
 		int[] halo = {0, 0, 0};
 
 		@Expose
@@ -214,8 +219,8 @@ public class SparkRain {
 		Boolean relabel;
 
 		@Expose
-		@CommandLine.Option(names = "--revert-array-attributes", paramLabel = "RELABEL", description = "Revert all array attributes (that are not dataset attributes)", defaultValue = "false")
-		Boolean revertArrayAttributes;
+		@CommandLine.Option(names = "--reverse-array-attributes", paramLabel = "RELABEL", description = "Reverse all array attributes (that are not dataset attributes)", defaultValue = "false")
+		Boolean reverseArrayAttributes;
 
 		@Expose
 		@CommandLine.Option(names = "--smooth-affinities", paramLabel = "SIGMA", description = "Smooth affinities before watersheds (if SIGMA > 0)", defaultValue = "0.0")
@@ -231,7 +236,7 @@ public class SparkRain {
 		@CommandLine.Option(names = "--json-disable-html-escape", defaultValue = "true")
 		transient Boolean disbaleHtmlEscape;
 
-		@CommandLine.Option(names = { "-h", "--help"}, usageHelp = true, description = "Display this help and exit")
+		@CommandLine.Option(names = {"-h", "--help"}, usageHelp = true, description = "Display this help and exit")
 		private Boolean help;
 
 		@Override
@@ -253,6 +258,7 @@ public class SparkRain {
 		}
 
 		public Offset[] enumeratedOffsets() {
+
 			final Offset[] enumeratedOffsets = new Offset[this.offsets.length];
 			for (int i = 0; i < offsets.length; ++i) {
 				final Offset o = this.offsets[i];
@@ -292,21 +298,20 @@ public class SparkRain {
 		labelUtilitiesSparkAttributes.put(VERSION_KEY, Version.VERSION_STRING);
 		final Map<String, Object> attributes = with(new HashMap<>(), LABEL_UTILITIES_SPARK_KEY, labelUtilitiesSparkAttributes);
 
-
 		final int[] taskBlockSize = IntStream.range(0, args.blockSize.length).map(d -> args.blockSize[d] * args.blocksPerTask[d]).toArray();
 		final boolean hasHalo = Arrays.stream(args.halo).filter(h -> h != 0).count() > 0;
 		if (hasHalo)
 			throw new UnsupportedOperationException("Halo currently not supported, please omit halo option!");
 
 		String[] uint64Datasets = args.minSize > 0
-				? new String[] {args.watersheds, args.merged, args.seededWatersheds, args.sizeFiltered}
-				: new String[] {args.watersheds, args.merged, args.seededWatersheds};
+				? new String[]{args.watersheds, args.merged, args.seededWatersheds, args.sizeFiltered}
+				: new String[]{args.watersheds, args.merged, args.seededWatersheds};
 		String[] uint8Datasets = {args.watershedSeeds};
 
-		String[] float32Datasets = args.smoothAffinitiesSigma > 0 ? new String[] {args.smoothedAffinities} : new String[] {};
+		String[] float32Datasets = args.smoothAffinitiesSigma > 0 ? new String[]{args.smoothedAffinities} : new String[]{};
 
-		final double[] resolution = reverted(Optional.ofNullable(n5in.get().getAttribute(args.affinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)), args.revertArrayAttributes);
-		final double[] offset = reverted(Optional.ofNullable(n5in.get().getAttribute(args.affinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]), args.revertArrayAttributes);
+		final double[] resolution = reversed(Optional.ofNullable(n5in.get().getAttribute(args.affinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)), args.reverseArrayAttributes);
+		final double[] offset = reversed(Optional.ofNullable(n5in.get().getAttribute(args.affinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]), args.reverseArrayAttributes);
 		attributes.put(RESOLUTION_KEY, resolution);
 		attributes.put(OFFSET_KEY, offset);
 
@@ -330,7 +335,6 @@ public class SparkRain {
 				attributes);
 
 		final Offset[] offsets = args.enumeratedOffsets();
-
 
 		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
 		try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
@@ -393,13 +397,13 @@ public class SparkRain {
 				.stream()
 				.map(i -> new Tuple2<>(Intervals.minAsLongArray(i), Intervals.maxAsLongArray(i)))
 				.collect(Collectors.toList());
-				;
+		;
 		final long[] negativeHalo = new long[halo.length];
 		Arrays.setAll(negativeHalo, d -> -halo[d]);
 
 		final List<Tuple2<Tuple2<long[], long[]>, Integer>> idCounts = sc
 				.parallelize(watershedBlocks)
-				.map(t -> (Interval) new FinalInterval(t._1(), t._2()))
+				.map(t -> (Interval)new FinalInterval(t._1(), t._2()))
 				.mapToPair(new CropAffinities(n5in, affinities, invertAffinitiesAxis, halo, smoothAffinitiesSigma))
 				.mapValues(affs -> {
 					// TODO how to avoid looking outside interval?
@@ -427,12 +431,12 @@ public class SparkRain {
 					final int[] symmetricOrder = new int[offsets.length];
 					Arrays.setAll(symmetricOrder, d -> offsets.length - 1 - d);
 					// LoopBuilder issues in this call!
-//					final RandomAccessibleInterval<FloatType> symmetricAffinities = Watersheds.constructAffinities(
-//							uncollapsedAffinities,
-//							offsets,
-//							new ArrayImgFactory<>(new FloatType()),
-//							symmetricOrder
-//					);
+					//					final RandomAccessibleInterval<FloatType> symmetricAffinities = Watersheds.constructAffinities(
+					//							uncollapsedAffinities,
+					//							offsets,
+					//							new ArrayImgFactory<>(new FloatType()),
+					//							symmetricOrder
+					//					);
 					final RandomAccessibleInterval<FloatType> symmetricAffinities = constructAffinitiesWithCopy(
 							uncollapsedAffinities,
 							new ArrayImgFactory<>(new FloatType()),
@@ -442,11 +446,11 @@ public class SparkRain {
 					final RandomAccessibleInterval<FloatType> symmetricSmoothedAffinities = uncollapsedSmoothedAffinities == null
 							? symmetricAffinities
 							: Watersheds.constructAffinities(
-									uncollapsedSmoothedAffinities,
-									offsets,
-									new ArrayImgFactory<>(new FloatType()),
-									symmetricOrder);
-//					}
+							uncollapsedSmoothedAffinities,
+							offsets,
+							new ArrayImgFactory<>(new FloatType()),
+							symmetricOrder);
+					//					}
 					final long[][] symmetricOffsets = Watersheds.symmetricOffsets(Watersheds.SymmetricOffsetOrder.ABCCBA, offsets);
 
 					final Pair<long[], long[]> parentsAndRoots = Watersheds.letItRain(
@@ -478,8 +482,8 @@ public class SparkRain {
 					final ArrayImg<BitType, LongArray> um = ArrayImgs.bits(dims);
 					final IntArrayUnionFind uf = new IntArrayUnionFind(roots.length);
 
-					final RandomAccessibleInterval<BitType> mask = Converters.convert((RandomAccessibleInterval<UnsignedLongType>) labels, (s, tgt) -> tgt.set(s.getIntegerLong() > 0), new BitType());
-					final ConnectedComponents.ToIndex toIndex = (it, index) -> parents[(int) index];
+					final RandomAccessibleInterval<BitType> mask = Converters.convert((RandomAccessibleInterval<UnsignedLongType>)labels, (s, tgt) -> tgt.set(s.getIntegerLong() > 0), new BitType());
+					final ConnectedComponents.ToIndex toIndex = (it, index) -> parents[(int)index];
 					ConnectedComponents.unionFindFromSymmetricAffinities(
 							Views.extendValue(mask, new BitType(false)),
 							Views.collapseReal(uncollapsedAffinities),
@@ -495,7 +499,6 @@ public class SparkRain {
 						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
 						n5out.get().writeBlock(merged, watershedAttributes, dataBlock);
 					}
-
 
 					final TIntIntHashMap counts = new TIntIntHashMap();
 					for (final UnsignedLongType vx : Views.iterable(labels)) {
@@ -530,16 +533,16 @@ public class SparkRain {
 					Watersheds.seedsFromMask(Views.extendValue(labels, new UnsignedLongType(Label.OUTSIDE)), watershedSeedsMaskImg, symmetricOffsets);
 					final List<Point> seeds = Watersheds.collectSeeds(watershedSeedsMaskImg);
 					LOG.debug("Found watershed seeds {}", seeds);
-					final RandomAccessibleInterval<UnsignedByteType> watershedSeedsMaskImgUint8 = Converters.convert(watershedSeedsMaskImg, (src,tgt) -> tgt.set(src.get() ? 1 : 0), new UnsignedByteType());
+					final RandomAccessibleInterval<UnsignedByteType> watershedSeedsMaskImgUint8 = Converters.convert(watershedSeedsMaskImg, (src, tgt) -> tgt.set(src.get() ? 1 : 0), new UnsignedByteType());
 					final DatasetAttributes croppedWatershedSeedsAtributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT8, new GzipCompression());
 					N5Utils.saveBlock(Views.interval(watershedSeedsMaskImgUint8, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, croppedWatershedSeedsAtributes, blockOffset);
 					if (hasHalo) {
 						throw new UnsupportedOperationException("Need to implement halo support!");
-//						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(watershedSeedsMaskImg), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
-//						n5out.get().writeBlock(watershedSeeds, watershedAttributes, dataBlock);
+						//						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(watershedSeedsMaskImg), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
+						//						n5out.get().writeBlock(watershedSeeds, watershedAttributes, dataBlock);
 					}
 
-					LOG.debug("Starting seeded watersheds with offsets {}", (Object) symmetricOffsets);
+					LOG.debug("Starting seeded watersheds with offsets {}", (Object)symmetricOffsets);
 					Watersheds.seededFromAffinities(
 							Views.collapseReal(symmetricSmoothedAffinities),
 							labels,
@@ -556,8 +559,7 @@ public class SparkRain {
 
 					return new Tuple2<>(new Tuple2<>(Intervals.minAsLongArray(t._1()), Intervals.maxAsLongArray(t._1())), roots.length - 1);
 				})
-				.collect()
-				;
+				.collect();
 
 		long startIndex = 1;
 		final List<Tuple2<Tuple2<long[], long[]>, Long>> idOffsets = new ArrayList<>();
@@ -606,6 +608,7 @@ public class SparkRain {
 			final String dataset,
 			final Interval interval,
 			final long addIfNotZero) throws IOException {
+
 		SparkRain.<UnsignedLongType>relabel(n5, dataset, interval, (src, tgt) -> {
 			final long val = src.getIntegerLong();
 			tgt.set(val == 0 ? 0 : val + addIfNotZero);
@@ -617,6 +620,7 @@ public class SparkRain {
 			final String dataset,
 			final Interval interval,
 			final BiConsumer<T, T> idMapping) throws IOException {
+
 		final DatasetAttributes attributes = n5.getDatasetAttributes(dataset);
 		final CellGrid grid = new CellGrid(attributes.getDimensions(), attributes.getBlockSize());
 		final RandomAccessibleInterval<T> data = Views.interval(N5Utils.<T>open(n5, dataset), interval);
@@ -624,7 +628,7 @@ public class SparkRain {
 		for (net.imglib2.util.Pair<T, T> p : Views.interval(Views.pair(Views.zeroMin(data), copy), Views.zeroMin(data)))
 			idMapping.accept(p.getA(), p.getB());
 		// LoopBuilder class loader issues in spark
-//		LoopBuilder.setImages(data, copy).forEachPixel(idMapping);
+		//		LoopBuilder.setImages(data, copy).forEachPixel(idMapping);
 		final long[] blockPos = Intervals.minAsLongArray(interval);
 		grid.getCellPosition(blockPos, blockPos);
 		N5Utils.saveBlock(copy, n5, dataset, attributes, blockPos);
@@ -635,6 +639,7 @@ public class SparkRain {
 			final String dataset,
 			final long[] blockPos,
 			final long addIfNonZero) throws IOException {
+
 		relabel(n5, dataset, blockPos, id -> id == 0 ? 0 : id + addIfNonZero);
 	}
 
@@ -643,8 +648,9 @@ public class SparkRain {
 			final String dataset,
 			final long[] blockPos,
 			final LongUnaryOperator idMapping) throws IOException {
+
 		final DatasetAttributes attributes = n5.getDatasetAttributes(dataset);
-		final LongArrayDataBlock block = ((LongArrayDataBlock) n5.readBlock(dataset, attributes, blockPos));
+		final LongArrayDataBlock block = ((LongArrayDataBlock)n5.readBlock(dataset, attributes, blockPos));
 		final long[] data = block.getData();
 		for (int i = 0; i < data.length; ++i) {
 			data[i] = idMapping.applyAsLong(data[i]);
@@ -666,12 +672,14 @@ public class SparkRain {
 			final String dataset,
 			final DatasetAttributes attributes,
 			final Map<String, ?> additionalAttributes) throws IOException {
+
 		n5.createDataset(dataset, attributes);
 		for (Map.Entry<String, ?> entry : additionalAttributes.entrySet())
 			n5.setAttribute(dataset, entry.getKey(), entry.getValue());
 	}
 
 	private static <K, V> Map<K, V> with(Map<K, V> map, K key, V value) {
+
 		map.put(key, value);
 		return map;
 	}
@@ -687,6 +695,7 @@ public class SparkRain {
 		private final boolean serializeSpecialFloatingPointValues = true;
 
 		private N5WriterSupplier(final String container, final boolean withPrettyPrinting, final boolean disableHtmlEscaping) {
+
 			this.container = container;
 			this.withPrettyPrinting = withPrettyPrinting;
 			this.disableHtmlEscaping = disableHtmlEscaping;
@@ -695,43 +704,46 @@ public class SparkRain {
 		@Override
 		public N5Writer get() {
 
-			try {
-				return Files.isDirectory(Paths.get(container))
-						? new N5FSWriter(container, createaBuilder())
-						: new N5HDF5Writer(container);
-			} catch (final IOException e) {
-				throw new RuntimeException(e);
-			}
+			return Files.isDirectory(Paths.get(container))
+					? new N5FSWriter(container, createaBuilder())
+					: new N5HDF5Writer(container);
 		}
 
 		private GsonBuilder createaBuilder() {
+
 			return serializeSpecialFloatingPointValues(withPrettyPrinting(disableHtmlEscaping(new GsonBuilder())));
 		}
 
 		private GsonBuilder serializeSpecialFloatingPointValues(final GsonBuilder builder) {
+
 			return with(builder, this.serializeSpecialFloatingPointValues, GsonBuilder::serializeSpecialFloatingPointValues);
 		}
 
 		private GsonBuilder withPrettyPrinting(final GsonBuilder builder) {
+
 			return with(builder, this.withPrettyPrinting, GsonBuilder::setPrettyPrinting);
 		}
 
 		private GsonBuilder disableHtmlEscaping(final GsonBuilder builder) {
+
 			return with(builder, this.disableHtmlEscaping, GsonBuilder::disableHtmlEscaping);
 		}
 
 		private static GsonBuilder with(final GsonBuilder builder, boolean applyAction, Function<GsonBuilder, GsonBuilder> action) {
+
 			return applyAction ? action.apply(builder) : builder;
 		}
 	}
 
 	private static double[] ones(final int length) {
+
 		double[] ones = new double[length];
 		Arrays.fill(ones, 1.0);
 		return ones;
 	}
 
 	private static Interval addDimension(final Interval interval, final long m, final long M) {
+
 		long[] min = new long[interval.numDimensions() + 1];
 		long[] max = new long[interval.numDimensions() + 1];
 		for (int d = 0; d < interval.numDimensions(); ++d) {
@@ -744,14 +756,17 @@ public class SparkRain {
 	}
 
 	private static String toString(final Interval interval) {
+
 		return String.format("(%s %s)", Arrays.toString(Intervals.minAsLongArray(interval)), Arrays.toString(Intervals.maxAsLongArray(interval)));
 	}
 
-	private static double[] reverted(final double[] array, final boolean revert) {
-		return revert ? reverted(array) : array;
+	private static double[] reversed(final double[] array, final boolean reverse) {
+
+		return reverse ? reversed(array) : array;
 	}
 
-	private static double[] reverted(final double[] array) {
+	private static double[] reversed(final double[] array) {
+
 		final double[] copy = new double[array.length];
 		for (int i = 0, k = copy.length - 1; i < copy.length; ++i, --k) {
 			copy[i] = array[k];
@@ -764,6 +779,7 @@ public class SparkRain {
 			final Interval interval,
 			final int channelDim,
 			double sigma) {
+
 		final ArrayImg<FloatType, FloatArray> img = ArrayImgs.floats(Intervals.dimensionsAsLongArray(interval));
 
 		for (long channel = interval.min(channelDim); channel <= interval.max(channelDim); ++channel) {
@@ -780,6 +796,7 @@ public class SparkRain {
 			final T invalid,
 			final long[]... offsets
 	) {
+
 		for (int index = 0; index < offsets.length; ++index) {
 			final IntervalView<T> slice = Views.hyperSlice(affs, affs.numDimensions() - 1, index);
 			for (int d = 0; d < offsets[index].length; ++d) {
@@ -810,6 +827,7 @@ public class SparkRain {
 				final boolean invertAffinitiesAxis,
 				final long[] halo,
 				final double smoothAffinitiesSigma) {
+
 			this.n5in = n5in;
 			this.affinities = affinities;
 			this.invertAffinitiesAxis = invertAffinitiesAxis;
@@ -819,6 +837,7 @@ public class SparkRain {
 
 		@Override
 		public Tuple2<Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<FloatType>>> call(final Interval interval) throws Exception {
+
 			RandomAccessibleInterval<FloatType> affs = N5Utils.open(n5in.get(), affinities);
 			affs = invertAffinitiesAxis ? Views.zeroMin(Views.invertAxis(affs, affs.numDimensions() - 1)) : affs;
 
@@ -831,10 +850,10 @@ public class SparkRain {
 			while (target.hasNext())
 				target.next().set(source.next());
 			// Class loader issues with loop builder on spark (non-local)
-//			LoopBuilder.setImages(affinityCrop, Views.interval(Views.extendValue(affs, new FloatType(Float.NaN)), withHaloAndChannels)).forEachPixel(FloatType::set);
+			//			LoopBuilder.setImages(affinityCrop, Views.interval(Views.extendValue(affs, new FloatType(Float.NaN)), withHaloAndChannels)).forEachPixel(FloatType::set);
 			return smoothAffinitiesSigma > 0.0
 					? new Tuple2<>(interval, new Tuple2<>(affinityCrop, smooth(affs, withHaloAndChannels, withHaloAndChannels.numDimensions() - 1, smoothAffinitiesSigma)))
-					: new Tuple2<>(interval, new Tuple2<>(affinityCrop, (ArrayImg<FloatType, FloatArray>) null));
+					: new Tuple2<>(interval, new Tuple2<>(affinityCrop, (ArrayImg<FloatType, FloatArray>)null));
 		}
 	}
 
@@ -861,12 +880,12 @@ public class SparkRain {
 
 		for (int offsetIndex = 0; offsetIndex < offsets.length; ++offsetIndex) {
 			final int targetIndex = offsets.length + order[offsetIndex];
-			final IntervalView<A> targetSlice = Views.hyperSlice(symmetricAffinities, dims.length - 1, (long) targetIndex);
+			final IntervalView<A> targetSlice = Views.hyperSlice(symmetricAffinities, dims.length - 1, (long)targetIndex);
 			final IntervalView<A> sourceSlice = Views.interval(Views.translate(
 					Views.extendValue(Views.hyperSlice(
 							zeroMinAffinities,
 							dims.length - 1,
-							(long) offsetIndex), nanExtension),
+							(long)offsetIndex), nanExtension),
 					offsets[offsetIndex]), targetSlice);
 
 			Cursor<A> source = Views.flatIterable(sourceSlice).cursor();

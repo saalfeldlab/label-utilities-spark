@@ -1,7 +1,11 @@
 package org.janelia.saalfeldlab.label.spark.affinities;
 
 import com.google.gson.annotations.Expose;
-import net.imglib2.*;
+import net.imglib2.FinalInterval;
+import net.imglib2.FinalRealInterval;
+import net.imglib2.Interval;
+import net.imglib2.RandomAccessible;
+import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.Grids;
 import net.imglib2.converter.Converters;
 import net.imglib2.img.array.ArrayImg;
@@ -16,7 +20,11 @@ import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.janelia.saalfeldlab.n5.*;
+import org.janelia.saalfeldlab.n5.DataType;
+import org.janelia.saalfeldlab.n5.DatasetAttributes;
+import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.saalfeldlab.n5.N5FSReader;
+import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,7 +64,7 @@ public class MakePredictionMask {
 		String inputDataset = null;
 
 		@Expose
-		@CommandLine.Option(names = "--input-dataset-size", paramLabel = "INPUT_DATASET_SIZE", description = "In voxels. One of INPUT_DATASET_SIZE and INPUT_DATASET must be specified", split=",")
+		@CommandLine.Option(names = "--input-dataset-size", paramLabel = "INPUT_DATASET_SIZE", description = "In voxels. One of INPUT_DATASET_SIZE and INPUT_DATASET must be specified", split = ",")
 		long[] inputDatasetSize;
 
 		@Expose
@@ -64,11 +72,11 @@ public class MakePredictionMask {
 		Boolean inputIsMask;
 
 		@Expose
-		@CommandLine.Option(names = "--mask-dataset", paramLabel = "MASK_DATASET", description = "Path to mask dataset in mask container. Will be written into", required=true)
+		@CommandLine.Option(names = "--mask-dataset", paramLabel = "MASK_DATASET", description = "Path to mask dataset in mask container. Will be written into", required = true)
 		String maskDataset = null;
 
 		@Expose
-		@CommandLine.Option(names = "--output-dataset-size", paramLabel = "OUTPUT_DATASET_SIZE", description = "In voxels. ", required = true, split=",")
+		@CommandLine.Option(names = "--output-dataset-size", paramLabel = "OUTPUT_DATASET_SIZE", description = "In voxels. ", required = true, split = ",")
 		long[] outputDatasetSIze;
 
 		@Expose
@@ -99,29 +107,28 @@ public class MakePredictionMask {
 		@CommandLine.Option(names = "--blocks-per-task", defaultValue = "1,1,1", split = ",")
 		int[] blocksPerTask;
 
-//		@Expose
-//		@CommandLine.Option(names = "--raw-container", paramLabel = "RAW_CONTAINER", description = "Path to raw container. Defaults to MASK_CONTAINER.")
-//		String rawContainer = null;
-//
-//		@Expose
-//		@CommandLine.Option(names = "prediction-container", paramLabel = "PREDICTION_CONTAINER", description = "Path to prediction container. Defaults to MASK_CONTAINER")
-//		String predictionContainer = null;
-//
-//		@Expose
-//		@CommandLine.Option(names = "--raw-dataset", paramLabel = "RAW_DATASET", description = "Path of raw dataset dataset in RAW_CONTAINER.", defaultValue = "volumes/raw")
-//		String rawDataset;
-//
-//		@Expose
-//		@CommandLine.Option(names = "--prediction-dataset", paramLabel = "PREDICTION_DATASET", description = "Path to prediction dataset in PREDICTION_CONTAINER", defaultValue = "volumes/affinities/predictions")
-//		String predictionDataset;
-
+		//		@Expose
+		//		@CommandLine.Option(names = "--raw-container", paramLabel = "RAW_CONTAINER", description = "Path to raw container. Defaults to MASK_CONTAINER.")
+		//		String rawContainer = null;
+		//
+		//		@Expose
+		//		@CommandLine.Option(names = "prediction-container", paramLabel = "PREDICTION_CONTAINER", description = "Path to prediction container. Defaults to MASK_CONTAINER")
+		//		String predictionContainer = null;
+		//
+		//		@Expose
+		//		@CommandLine.Option(names = "--raw-dataset", paramLabel = "RAW_DATASET", description = "Path of raw dataset dataset in RAW_CONTAINER.", defaultValue = "volumes/raw")
+		//		String rawDataset;
+		//
+		//		@Expose
+		//		@CommandLine.Option(names = "--prediction-dataset", paramLabel = "PREDICTION_DATASET", description = "Path to prediction dataset in PREDICTION_CONTAINER", defaultValue = "volumes/affinities/predictions")
+		//		String predictionDataset;
 
 		@Override
 		public Void call() throws Exception {
 
-//			rawContainer = rawContainer == null ? maskContainer : rawContainer;
-//
-//			predictionContainer = predictionContainer == null ? maskContainer : predictionContainer;
+			//			rawContainer = rawContainer == null ? maskContainer : rawContainer;
+			//
+			//			predictionContainer = predictionContainer == null ? maskContainer : predictionContainer;
 			if (inputDatasetSize == null && inputDataset == null)
 				throw new Exception("One of input dataset size or input dataset must be specified!");
 
@@ -129,14 +136,12 @@ public class MakePredictionMask {
 				inputDatasetSize = new N5FSReader(inputContainer).getDatasetAttributes(inputDataset).getDimensions();
 
 			for (int d = 0; d < inputOffset.length; ++d)
-				if (inputOffset[d] / inputResolution[d] != (int) (inputOffset[d] / inputResolution[d]))
+				if (inputOffset[d] / inputResolution[d] != (int)(inputOffset[d] / inputResolution[d]))
 					throw new Exception("Offset not integer multiple of resolution!");
 
 			for (int d = 0; d < outputOffset.length; ++d)
-				if (outputOffset[d] / outputResolution[d] != (int) (outputOffset[d] / outputResolution[d]))
+				if (outputOffset[d] / outputResolution[d] != (int)(outputOffset[d] / outputResolution[d]))
 					throw new Exception("Offset not integer multiple of resolution!");
-
-
 
 			return null;
 		}
@@ -148,6 +153,7 @@ public class MakePredictionMask {
 		}
 
 		public Supplier<RandomAccessible<UnsignedByteType>> inputMaskSupplier() {
+
 			if (inputDataset == null || !inputIsMask) {
 				return new MaskProviderFromDims(inputDatasetSize);
 			} else {
@@ -158,39 +164,46 @@ public class MakePredictionMask {
 		}
 
 		public double[] snapDimensionsToBlockSize(final double[] dimensionsWorld, final double[] blockSizeWorld) {
+
 			final double[] snapped = new double[dimensionsWorld.length];
 			Arrays.setAll(snapped, d -> Math.ceil(dimensionsWorld[d] / blockSizeWorld[d]) * blockSizeWorld[d]);
 			return snapped;
 		}
 
 		public double[] inputSizeWorld() {
+
 			final double[] inputSizeWorld = new double[inputDatasetSize.length];
 			Arrays.setAll(inputSizeWorld, d -> inputDatasetSize[d] * inputResolution[d]);
 			return inputSizeWorld;
 		}
 
 		public double[] inputSizeWorldSnapped() {
+
 			return snapDimensionsToBlockSize(inputSizeWorld(), networkOutputSizeWorld);
 		}
 
 		public double[] networkSizeDiffWorld() {
+
 			final double[] diff = new double[this.networkInputSizeWorld.length];
 			Arrays.setAll(diff, d -> networkInputSizeWorld[d] - networkOutputSizeWorld[d]);
 			return diff;
 		}
 
 		public double[] networkSizeDiffHalfWorld() {
+
 			final double[] diff = networkSizeDiffWorld();
 			Arrays.setAll(diff, d -> diff[d] / 2);
 			return diff;
 		}
 
 		public double[] networkOutputSize() {
+
 			return divide(this.networkInputSizeWorld, outputResolution);
 		}
 	}
 
 	public static void main(String[] argv) throws IOException {
+
 		run(argv);
 	}
 
@@ -205,8 +218,8 @@ public class MakePredictionMask {
 		final double[] networkSizeDiffHalfWorld = args.networkSizeDiffHalfWorld();
 		final long[] networkSizeDiff = asLong(divide(networkSizeDiffWorld, args.outputResolution));
 
-//		final double[] validMin = networkSizeDiffHalfWorld.clone();
-//		final double[] validMax = subtract(inputSizeWorld, networkSizeDiffHalfWorld);
+		//		final double[] validMin = networkSizeDiffHalfWorld.clone();
+		//		final double[] validMax = subtract(inputSizeWorld, networkSizeDiffHalfWorld);
 
 		final double[] outputDatasetSizeDouble = divide(inputSizeWorldSnappedToOutput, args.outputResolution);
 		final long[] outputDatasetSize = args.outputDatasetSIze;
@@ -220,7 +233,7 @@ public class MakePredictionMask {
 		n5out.get().setAttribute(args.maskDataset, "offset", args.outputOffset);
 		n5out.get().setAttribute(args.maskDataset, "min", 0);
 		n5out.get().setAttribute(args.maskDataset, "max", 1);
-		n5out.get().setAttribute(args.maskDataset, "value_range", new double[] {0, 1});
+		n5out.get().setAttribute(args.maskDataset, "value_range", new double[]{0, 1});
 
 		run(
 				n5out,
@@ -247,6 +260,7 @@ public class MakePredictionMask {
 			final Supplier<RandomAccessible<UnsignedByteType>> inputMask,
 			final long[] outputDatasetSize,
 			final int[] blockSize) {
+
 		final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
 		try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
 			final List<Tuple2<Tuple2<long[], long[]>, long[]>> blocks = Grids
@@ -264,8 +278,8 @@ public class MakePredictionMask {
 						final DatasetAttributes attributes = new DatasetAttributes(outputDatasetSize, blockSize, DataType.UINT8, new GzipCompression());
 						final double[] minReal = LongStream.of(min).asDoubleStream().toArray();
 						final double[] maxReal = LongStream.of(max).asDoubleStream().toArray();
-//						final Scale outputScale = new Scale(outputVoxelSize);
-//						final Scale inputScale = new Scale(inputVoxelSize);
+						//						final Scale outputScale = new Scale(outputVoxelSize);
+						//						final Scale inputScale = new Scale(inputVoxelSize);
 						final AffineTransform3D outputTransform = new AffineTransform3D();
 						outputTransform.set(outputVoxelSize[0], 0, 0);
 						outputTransform.set(outputVoxelSize[1], 1, 1);
@@ -294,10 +308,10 @@ public class MakePredictionMask {
 						}
 
 						final ArrayImg<UnsignedByteType, ByteArray> outputMask = ArrayImgs.unsignedBytes(Intervals.dimensionsAsLongArray(interval));
-						Arrays.fill(outputMask.update(null).getCurrentStorageArray(), isForeground ? (byte) 1 : 0);
+						Arrays.fill(outputMask.update(null).getCurrentStorageArray(), isForeground ? (byte)1 : 0);
 						// this is bad alignment area in cremi sample_A+
-//						for (long z = Math.max(min[2], 344); z < Math.min(max[2], 357); ++z)
-//							Views.hyperSlice(Views.translate(outputMask, min), 2, z).forEach(UnsignedByteType::setZero);
+						//						for (long z = Math.max(min[2], 344); z < Math.min(max[2], 357); ++z)
+						//							Views.hyperSlice(Views.translate(outputMask, min), 2, z).forEach(UnsignedByteType::setZero);
 
 						N5Utils.saveBlock(
 								outputMask,
@@ -308,63 +322,70 @@ public class MakePredictionMask {
 					});
 		}
 
-
 	}
 
 	private static long[] asLong(double[] array) {
+
 		return convertAsLong(array, d -> d);
 	}
 
 	private static int[] asInt(double[] array) {
+
 		return convertAsInt(array, d -> d);
 	}
 
 	private static long[] convertAsLong(double[] array, DoubleUnaryOperator converter) {
+
 		final long[] ceil = new long[array.length];
-		Arrays.setAll(ceil, d -> (long) converter.applyAsDouble(array[d]));
+		Arrays.setAll(ceil, d -> (long)converter.applyAsDouble(array[d]));
 		return ceil;
 	}
 
 	private static int[] convertAsInt(double[] array, DoubleUnaryOperator converter) {
+
 		final int[] ceil = new int[array.length];
-		Arrays.setAll(ceil, d -> (int) converter.applyAsDouble(array[d]));
+		Arrays.setAll(ceil, d -> (int)converter.applyAsDouble(array[d]));
 		return ceil;
 	}
 
-
 	private static double[] convert(double[] array, DoubleUnaryOperator converter) {
+
 		final double[] ceil = new double[array.length];
 		Arrays.setAll(ceil, d -> converter.applyAsDouble(array[d]));
 		return ceil;
 	}
 
 	private static double[] subtract(final double[] minuend, final double[] subtrahend) {
+
 		final double[] difference = new double[minuend.length];
 		Arrays.setAll(difference, d -> minuend[d] - subtrahend[d]);
 		return difference;
 	}
 
 	private static double[] divide(final double[] a, final double[] b) {
+
 		final double[] quotient = new double[a.length];
 		Arrays.setAll(quotient, d -> a[d] / b[d]);
 		return quotient;
 	}
 
 	private static <T> T toMinMaxTuple(final Interval interval, BiFunction<long[], long[], T> toTuple) {
+
 		return toTuple.apply(Intervals.minAsLongArray(interval), Intervals.maxAsLongArray(interval));
 	}
 
 	private static class MaskProviderFromDims implements Supplier<RandomAccessible<UnsignedByteType>>, Serializable {
 
-
 		private final long[] dims;
 
 		private MaskProviderFromDims(long[] dims) {
+
 			this.dims = dims;
 		}
 
 		@Override
 		public RandomAccessible<UnsignedByteType> get() {
+
 			return Views.extendZero(ConstantUtils.constantRandomAccessibleInterval(new UnsignedByteType(1), dims.length, new FinalInterval(dims)));
 		}
 	}
@@ -376,23 +397,19 @@ public class MakePredictionMask {
 		private final String dataset;
 
 		private MaskProviderFromN5(N5WriterSupplier n5, String dataset) {
+
 			this.n5 = n5;
 			this.dataset = dataset;
 		}
 
 		@Override
 		public RandomAccessible<UnsignedByteType> get() {
-			try {
-				final RandomAccessibleInterval<IntegerType<?>> img = (RandomAccessibleInterval) N5Utils.open(n5.get(), dataset);
-				final RandomAccessibleInterval<UnsignedByteType> convertedImg = Converters.convert(img, (s, t) -> t.setInteger(s.getIntegerLong()), new UnsignedByteType());
-				return Views.extendValue(convertedImg, new UnsignedByteType(0));
-			} catch (IOException e) {
-				throw new RuntimeException(e);
-			}
+
+			final RandomAccessibleInterval<IntegerType<?>> img = (RandomAccessibleInterval)N5Utils.open(n5.get(), dataset);
+			final RandomAccessibleInterval<UnsignedByteType> convertedImg = Converters.convert(img, (s, t) -> t.setInteger(s.getIntegerLong()), new UnsignedByteType());
+			return Views.extendValue(convertedImg, new UnsignedByteType(0));
 		}
 
 	}
-
-
 
 }

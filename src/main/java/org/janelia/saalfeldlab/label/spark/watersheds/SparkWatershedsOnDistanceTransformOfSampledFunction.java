@@ -150,7 +150,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		int[] blockSize = {64, 64, 64};
 
 		@Expose
-		@CommandLine.Option(names = "--blocks-per-task", paramLabel = "BLOCKS_PER_TASK", description = "How many blocks to combine for watersheds/connected components (one value per dimension)", split=",")
+		@CommandLine.Option(names = "--blocks-per-task", paramLabel = "BLOCKS_PER_TASK", description = "How many blocks to combine for watersheds/connected components (one value per dimension)", split = ",")
 		int[] blocksPerTask = {1, 1, 1};
 
 		@Expose
@@ -170,8 +170,8 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		Boolean relabel;
 
 		@Expose
-		@CommandLine.Option(names = "--revert-array-attributes", paramLabel = "RELABEL", description = "Revert all array attributes (that are not dataset attributes)", defaultValue = "false")
-		Boolean revertArrayAttributes;
+		@CommandLine.Option(names = "--reverse-array-attributes", paramLabel = "RELABEL", description = "Reverse all array attributes (that are not dataset attributes)", defaultValue = "false")
+		Boolean reverseArrayAttributes;
 
 		@CommandLine.Option(names = "--json-pretty-print", defaultValue = "true")
 		transient Boolean prettyPrint;
@@ -179,7 +179,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		@CommandLine.Option(names = "--json-disable-html-escape", defaultValue = "true")
 		transient Boolean disbaleHtmlEscape;
 
-		@CommandLine.Option(names = { "-h", "--help"}, usageHelp = true, description = "Display this help and exit")
+		@CommandLine.Option(names = {"-h", "--help"}, usageHelp = true, description = "Display this help and exit")
 		private Boolean help;
 
 		@Override
@@ -221,12 +221,11 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		labelUtilitiesSparkAttributes.put(VERSION_KEY, Version.VERSION_STRING);
 		final Map<String, Object> attributes = with(new HashMap<>(), LABEL_UTILITIES_SPARK_KEY, labelUtilitiesSparkAttributes);
 
-
 		String[] uint64Datasets = {args.merged, args.seededWatersheds, args.watershedSeeds, args.blockMerged};
 		String[] float64Datasets = {args.distanceTransform};
 
-		final double[] resolution = reverted(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)), args.revertArrayAttributes);
-		final double[] offset = reverted(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]), args.revertArrayAttributes);
+		final double[] resolution = reversed(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)), args.reverseArrayAttributes);
+		final double[] offset = reversed(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]), args.reverseArrayAttributes);
 		attributes.put(RESOLUTION_KEY, resolution);
 		attributes.put(OFFSET_KEY, offset);
 
@@ -259,7 +258,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 					outputDims,
 					DoubleStream.of(resolution).map(d -> d / DoubleStream.of(resolution).min().getAsDouble()).map(d -> args.weightDistanceTransform * d * d).toArray(), // TODO maybe pass these as parameters through CLI instead?
 					args.seedDistance,
-//					new SerializableMergeWatershedsMinThresholdSupplier(args.threshold),
+					//					new SerializableMergeWatershedsMinThresholdSupplier(args.threshold),
 					new SerializableMergeWatershedsMedianThresholdSupplier(args.mergeFragmentThreshold),
 					args.mergeFragmentThreshold,
 					args.averagedAffinities,
@@ -301,11 +300,11 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 				.stream()
 				.map(i -> new Tuple2<>(Intervals.minAsLongArray(i), Intervals.maxAsLongArray(i)))
 				.collect(Collectors.toList());
-				;
+		;
 
 		final List<Tuple2<Tuple2<long[], long[]>, Integer>> idCounts = sc
 				.parallelize(watershedBlocks)
-				.map(t -> (Interval) new FinalInterval(t._1(), t._2()))
+				.map(t -> (Interval)new FinalInterval(t._1(), t._2()))
 				.mapToPair(new CropAffinitiesToDistanceTransform(n5in, averagedAffinities, distanceTransformWeights))
 				.mapToPair(t -> {
 					final Interval block = t._1();
@@ -383,18 +382,17 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 
 					N5Utils.saveBlock(labels, n5out.get(), merged, attributes.apply(DataType.UINT64), blockOffset);
 					final boolean wasSuccessful = true;
-//					final IntervalView<UnsignedLongType> reloaded = Views.interval(N5Utils.<UnsignedLongType>open(n5out.get(), merged), block);
-//					final Cursor<UnsignedLongType> r = Views.flatIterable(reloaded).cursor();
-//					final Cursor<UnsignedLongType> m = Views.flatIterable(labels).cursor();
-//					boolean wasSuccessful = true;
-//					while(r.hasNext() && wasSuccessful) {
-//						wasSuccessful = r.next().valueEquals(m.next());
-//					}
+					//					final IntervalView<UnsignedLongType> reloaded = Views.interval(N5Utils.<UnsignedLongType>open(n5out.get(), merged), block);
+					//					final Cursor<UnsignedLongType> r = Views.flatIterable(reloaded).cursor();
+					//					final Cursor<UnsignedLongType> m = Views.flatIterable(labels).cursor();
+					//					boolean wasSuccessful = true;
+					//					while(r.hasNext() && wasSuccessful) {
+					//						wasSuccessful = r.next().valueEquals(m.next());
+					//					}
 
 					return new Tuple2<>(new Tuple2<>(Intervals.minAsLongArray(t._1()), Intervals.maxAsLongArray(t._1())), wasSuccessful ? ids.size() : -1);
 				})
-				.collect()
-				;
+				.collect();
 
 		if (idCounts.stream().mapToInt(Tuple2::_2).anyMatch(c -> c < 0)) {
 			// TODO log failed blocks. Right now, just throw exception
@@ -415,9 +413,9 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 						LOG.debug("Relabeling block ({} {}) starting at id {}", t._1()._1(), t._1()._2(), t._2());
 						final N5Writer n5 = n5out.get();
 						final Interval interval = new FinalInterval(t._1()._1(), t._1()._2());
-//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, t._2());
+						//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, t._2());
 						relabel(n5, merged, merged, interval, t._2());
-//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, t._2());
+						//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, t._2());
 
 						// TODO do halo relabeling
 
@@ -431,7 +429,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			n5out.get().setAttribute(merged, "maxId", maxId);
 			n5out.get().setAttribute(seededWatersheds, "maxId", maxId);
 
-//			final IntArrayUnionFind uf = findOverlappingLabelsArgMaxNoHalo(sc, n5out, merged, new IntArrayUnionFind((int) (maxId + 2)), outputDims, blockSize, blocksPerTask, 0);
+			//			final IntArrayUnionFind uf = findOverlappingLabelsArgMaxNoHalo(sc, n5out, merged, new IntArrayUnionFind((int) (maxId + 2)), outputDims, blockSize, blocksPerTask, 0);
 			final LongHashMapUnionFind uf = findOverlappingLabelsThresholdMedianEdgeAffinities(
 					sc,
 					n5out,
@@ -456,9 +454,8 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 						: (maxId);
 
 				LOG.debug("Max label = {} min label = {} for block ({} {})", maxLabel, minLabel, idOffset._1()._1(), idOffset._1()._2());
-				final long[] keys = new long[(int) (maxLabel - minLabel)];
+				final long[] keys = new long[(int)(maxLabel - minLabel)];
 				final long[] vals = new long[keys.length];
-
 
 				for (int i = 0; i < keys.length; ++i) {
 					final long k = i + minLabel;
@@ -479,9 +476,9 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 						final Interval interval = new FinalInterval(t._1()._1(), t._1()._2());
 						final TLongLongMap mapping = new TLongLongHashMap(t._2()._1(), t._2()._2());
 
-//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, mapping);
+						//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, interval, mapping);
 						return relabel(n5out.get(), merged, blockMerged, interval, mapping);
-//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, mapping);
+						//						relabel(n5, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, interval, mapping);
 					})
 					.collect();
 			if (returnCodes.stream().anyMatch(r -> !r))
@@ -497,6 +494,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			final String target,
 			final Interval interval,
 			final TLongLongMap mapping) throws IOException {
+
 		return SparkWatershedsOnDistanceTransformOfSampledFunction.<UnsignedLongType>relabel(n5, source, target, interval, (src, tgt) -> {
 			final long val = mapping.get(src.getIntegerLong());
 			if (val != 0)
@@ -510,6 +508,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			final String target,
 			final Interval interval,
 			final long addIfNotZero) throws IOException {
+
 		final CachedMapper mapper = new CachedMapper(addIfNotZero);
 		SparkWatershedsOnDistanceTransformOfSampledFunction.<UnsignedLongType>relabel(n5, source, target, interval, (src, tgt) -> tgt.set(mapper.applyAsLong(src.getIntegerLong())));
 	}
@@ -520,6 +519,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			final String target,
 			final Interval interval,
 			final BiConsumer<T, T> idMapping) throws IOException {
+
 		final DatasetAttributes attributes = n5.getDatasetAttributes(source);
 		final CellGrid grid = new CellGrid(attributes.getDimensions(), attributes.getBlockSize());
 		final RandomAccessibleInterval<T> data = Views.interval(N5Utils.<T>open(n5, source), interval);
@@ -538,11 +538,11 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		final long[] blockPos = Intervals.minAsLongArray(interval);
 		grid.getCellPosition(blockPos, blockPos);
 		N5Utils.saveBlock(copy, n5, target, attributes, blockPos);
-//		final Cursor<UnsignedLongType> reloaded = Views.flatIterable(Views.interval(N5Utils.<UnsignedLongType>open(n5, target), interval)).cursor();
-//		final Cursor<T> c = Views.flatIterable(copy).cursor();
-//		while (c.hasNext())
-//			if (c.next().getIntegerLong() != reloaded.next().getIntegerLong())
-//				return false;
+		//		final Cursor<UnsignedLongType> reloaded = Views.flatIterable(Views.interval(N5Utils.<UnsignedLongType>open(n5, target), interval)).cursor();
+		//		final Cursor<T> c = Views.flatIterable(copy).cursor();
+		//		while (c.hasNext())
+		//			if (c.next().getIntegerLong() != reloaded.next().getIntegerLong())
+		//				return false;
 		return true;
 	}
 
@@ -551,6 +551,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			final String dataset,
 			final long[] blockPos,
 			final long addIfNonZero) throws IOException {
+
 		relabel(n5, dataset, blockPos, id -> id == 0 ? 0 : id + addIfNonZero);
 	}
 
@@ -559,14 +560,16 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			final String dataset,
 			final long[] blockPos,
 			final LongUnaryOperator idMapping) throws IOException {
+
 		final DatasetAttributes attributes = n5.getDatasetAttributes(dataset);
-		final LongArrayDataBlock block = ((LongArrayDataBlock) n5.readBlock(dataset, attributes, blockPos));
+		final LongArrayDataBlock block = ((LongArrayDataBlock)n5.readBlock(dataset, attributes, blockPos));
 		final long[] data = block.getData();
 		for (int i = 0; i < data.length; ++i) {
 			data[i] = idMapping.applyAsLong(data[i]);
 		}
 		n5.writeBlock(dataset, attributes, new LongArrayDataBlock(block.getSize(), data, block.getGridPosition()));
 	}
+
 	private static void prepareOutputDatasets(
 			final N5Writer n5,
 			final Map<String, DatasetAttributes> datasets,
@@ -581,12 +584,14 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			final String dataset,
 			final DatasetAttributes attributes,
 			final Map<String, ?> additionalAttributes) throws IOException {
+
 		n5.createDataset(dataset, attributes);
 		for (Map.Entry<String, ?> entry : additionalAttributes.entrySet())
 			n5.setAttribute(dataset, entry.getKey(), entry.getValue());
 	}
 
 	private static <K, V> Map<K, V> with(Map<K, V> map, K key, V value) {
+
 		map.put(key, value);
 		return map;
 	}
@@ -602,6 +607,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		private final boolean serializeSpecialFloatingPointValues = true;
 
 		private N5WriterSupplier(final String container, final boolean withPrettyPrinting, final boolean disableHtmlEscaping) {
+
 			this.container = container;
 			this.withPrettyPrinting = withPrettyPrinting;
 			this.disableHtmlEscaping = disableHtmlEscaping;
@@ -610,43 +616,46 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		@Override
 		public N5Writer get() {
 
-			try {
-				return Files.isDirectory(Paths.get(container))
-						? new N5FSWriter(container, createaBuilder())
-						: new N5HDF5Writer(container);
-			} catch (final IOException e) {
-				throw new RuntimeException(e);
-			}
+			return Files.isDirectory(Paths.get(container))
+					? new N5FSWriter(container, createaBuilder())
+					: new N5HDF5Writer(container);
 		}
 
 		private GsonBuilder createaBuilder() {
+
 			return serializeSpecialFloatingPointValues(withPrettyPrinting(disableHtmlEscaping(new GsonBuilder())));
 		}
 
 		private GsonBuilder serializeSpecialFloatingPointValues(final GsonBuilder builder) {
+
 			return with(builder, this.serializeSpecialFloatingPointValues, GsonBuilder::serializeSpecialFloatingPointValues);
 		}
 
 		private GsonBuilder withPrettyPrinting(final GsonBuilder builder) {
+
 			return with(builder, this.withPrettyPrinting, GsonBuilder::setPrettyPrinting);
 		}
 
 		private GsonBuilder disableHtmlEscaping(final GsonBuilder builder) {
+
 			return with(builder, this.disableHtmlEscaping, GsonBuilder::disableHtmlEscaping);
 		}
 
 		private static GsonBuilder with(final GsonBuilder builder, boolean applyAction, Function<GsonBuilder, GsonBuilder> action) {
+
 			return applyAction ? action.apply(builder) : builder;
 		}
 	}
 
 	private static double[] ones(final int length) {
+
 		double[] ones = new double[length];
 		Arrays.fill(ones, 1.0);
 		return ones;
 	}
 
 	private static Interval addDimension(final Interval interval, final long m, final long M) {
+
 		long[] min = new long[interval.numDimensions() + 1];
 		long[] max = new long[interval.numDimensions() + 1];
 		for (int d = 0; d < interval.numDimensions(); ++d) {
@@ -659,14 +668,17 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 	}
 
 	private static String toString(final Interval interval) {
+
 		return String.format("(%s %s)", Arrays.toString(Intervals.minAsLongArray(interval)), Arrays.toString(Intervals.maxAsLongArray(interval)));
 	}
 
-	private static double[] reverted(final double[] array, final boolean revert) {
-		return revert ? reverted(array) : array;
+	private static double[] reversed(final double[] array, final boolean reverse) {
+
+		return reverse ? reversed(array) : array;
 	}
 
-	private static double[] reverted(final double[] array) {
+	private static double[] reversed(final double[] array) {
+
 		final double[] copy = new double[array.length];
 		for (int i = 0, k = copy.length - 1; i < copy.length; ++i, --k) {
 			copy[i] = array[k];
@@ -679,6 +691,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			final Interval interval,
 			final int channelDim,
 			double sigma) {
+
 		final ArrayImg<FloatType, FloatArray> img = ArrayImgs.floats(Intervals.dimensionsAsLongArray(interval));
 
 		for (long channel = interval.min(channelDim); channel <= interval.max(channelDim); ++channel) {
@@ -695,6 +708,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			final T invalid,
 			final long[]... offsets
 	) {
+
 		for (int index = 0; index < offsets.length; ++index) {
 			final IntervalView<T> slice = Views.hyperSlice(affs, affs.numDimensions() - 1, index);
 			for (int d = 0; d < offsets[index].length; ++d) {
@@ -744,7 +758,6 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 					final RandomAccessibleInterval<UnsignedLongType> labels = N5Utils.open(labelContainer.get(), labelDataset);
 					final RandomAccessibleInterval<UnsignedLongType> thisBlockLabels = Views.interval(labels, minMax._1(), thisBlockMax);
 					final RandomAccessibleInterval<FloatType> affinities = N5Utils.open(affinitiesContainer.get(), affinitiesDataset);
-
 
 					final TLongSet ignoreTheseSet = new TLongHashSet(ignoreThese);
 
@@ -804,8 +817,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 							if (thisLabel < thatLabel) {
 								e1 = thisLabel;
 								e2 = thatLabel;
-							}
-							else {
+							} else {
 								e1 = thatLabel;
 								e2 = thisLabel;
 							}
@@ -825,7 +837,6 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 						}
 
 						LOG.info("Edge affinities: {}", affinitiesByEdge);
-
 
 						affinitiesByEdge.forEachEntry((k, v) -> {
 							TLongObjectIterator<TDoubleArrayList> edgeIt = v.iterator();
@@ -868,7 +879,6 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		}
 
 		return uf;
-
 
 	}
 
@@ -956,13 +966,12 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 							addOne(thisMap.get(thisLabel), thatLabel);
 							addOne(thatMap.get(thatLabel), thisLabel);
 
-//							thatArgMax.forEachEntry((k, v) -> {
-////								if (thatArgMax.get(v) == k)
-//								localUF.join(localUF.findRoot(v), localUF.findRoot(k));
-////								mapping.put(k, v);
-//								return true;
-//							});
-
+							//							thatArgMax.forEachEntry((k, v) -> {
+							////								if (thatArgMax.get(v) == k)
+							//								localUF.join(localUF.findRoot(v), localUF.findRoot(k));
+							////								mapping.put(k, v);
+							//								return true;
+							//							});
 
 						}
 
@@ -1005,7 +1014,6 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 
 		return uf;
 
-
 	}
 
 	private static class CropAffinitiesToDistanceTransform implements PairFunction<Interval, Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<DoubleType>>> {
@@ -1020,6 +1028,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 				final Supplier<? extends N5Reader> n5in,
 				final String affinities,
 				final double[] weights) {
+
 			this.n5in = n5in;
 			this.affinities = affinities;
 			this.weights = weights;
@@ -1030,11 +1039,13 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			private final double replacement;
 
 			private ReplaceNaNWith(double replacement) {
+
 				this.replacement = replacement;
 			}
 
 			@Override
 			public void convert(T src, T tgt) {
+
 				final double t = src.getRealDouble();
 				tgt.setReal(Double.isNaN(t) ? replacement : t);
 			}
@@ -1042,6 +1053,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 
 		@Override
 		public Tuple2<Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<DoubleType>>> call(final Interval interval) throws Exception {
+
 			final RandomAccessibleInterval<FloatType> affsImg = N5Utils.open(n5in.get(), affinities);
 
 			final RandomAccessible<FloatType> affs = Converters.convert(Views.extendValue(affsImg, new FloatType(0.0f)), new ReplaceNaNWith<>(0.0), new FloatType());
@@ -1060,7 +1072,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 					weights
 			);
 			// TODO should we actually rewrite those?
-			double[] minMax = new double[] {Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
+			double[] minMax = new double[]{Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
 			LoopBuilder
 					.setImages(Views.interval(affs, withContext), distanceTransform)
 					.forEachPixel((a, d) -> {
@@ -1081,14 +1093,17 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 	}
 
 	private static <T> T toMinMaxTuple(final Interval interval, BiFunction<long[], long[], T> toTuple) {
+
 		return toTuple.apply(Intervals.minAsLongArray(interval), Intervals.maxAsLongArray(interval));
 	}
 
 	private static void addOne(final TLongIntMap countMap, final long label) {
+
 		countMap.put(label, countMap.get(label) + 1);
 	}
 
 	private static TLongLongMap argMaxCounts(final TLongObjectMap<TLongIntMap> counts) {
+
 		final TLongLongMap mapping = new TLongLongHashMap();
 		counts.forEachEntry((k, v) -> {
 			mapping.put(k, argMaxCount(v));
@@ -1098,6 +1113,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 	}
 
 	private static long argMaxCount(final TLongIntMap counts) {
+
 		long maxCount = Long.MIN_VALUE;
 		long argMaxCount = 0;
 		for (final TLongIntIterator it = counts.iterator(); it.hasNext(); ) {
@@ -1107,18 +1123,19 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 				maxCount = v;
 				argMaxCount = it.key();
 			}
-		};
+		}
+		;
 		return argMaxCount;
 	}
 
 	private static class CachedMapper implements LongUnaryOperator {
-
 
 		private long nextId;
 
 		private final TLongLongMap cache = new TLongLongHashMap();
 
 		private CachedMapper(final long firstId) {
+
 			this.nextId = firstId;
 		}
 
@@ -1136,6 +1153,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 	}
 
 	private static <T> T computeIfAbsent(final TLongObjectMap<T> map, final long key, final LongFunction<T> mappingFactory) {
+
 		final T value = map.get(key);
 		if (value != null)
 			return value;

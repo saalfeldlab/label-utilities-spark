@@ -4,12 +4,12 @@
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
-		<version>31.1.0</version>
+		<version>37.0.0</version>
 	</parent>
 
 	<groupId>org.janelia.saalfeldlab</groupId>
 	<artifactId>label-utilities-spark</artifactId>
-	<version>0.9.5-SNAPSHOT</version>
+	<version>1.0.0-SNAPSHOT</version>
 
 	<name>N5-Label-Multisets-Spark</name>
 	<description>Spark based tools for label data.</description>
@@ -18,7 +18,7 @@
 	<!-- <organization>saalfeldlab</organization> -->
 	<organization>
 		<name>Saalfeld Lab</name>
-		<url>http://saalfeldlab.janelia.org/</url>
+		<url>https://saalfeldlab.janelia.org/</url>
 	</organization>
 	<licenses>
 		<license>
@@ -30,7 +30,7 @@
 	<mailingLists>
 		<mailingList>
 			<name>ImageJ Forum</name>
-			<archive>http://image.sc/</archive>
+			<archive>https://image.sc/</archive>
 		</mailingList>
 	</mailingLists>
 
@@ -38,7 +38,7 @@
 		<developer>
 			<id>hanslovsky</id>
 			<name>Philipp Hanslovsky</name>
-			<url>http://imagej.net/User:Hanslovsky</url>
+			<url>https://imagej.net/User:Hanslovsky</url>
 			<roles>
 				<role>founder</role>
 				<role>lead</role>
@@ -46,8 +46,19 @@
 				<role>debugger</role>
 				<role>reviewer</role>
 				<role>support</role>
+			</roles>
+		</developer>
+		<developer>
+			<id>hulbertc</id>
+			<name>Caleb Hulbert</name>
+			<email>hulbertc@janelia.hhmi.org</email>
+			<organization>HHMI Janelia</organization>
+			<organizationUrl>https://janelia.org/</organizationUrl>
+			<roles>
+				<role>developer</role>
 				<role>maintainer</role>
 			</roles>
+			<timezone>-5</timezone>
 		</developer>
 	</developers>
 
@@ -83,7 +94,30 @@
 		<releaseProfiles>sign,deploy-to-scijava</releaseProfiles>
 		<package-name>org.janelia.saalfeldlab.label.spark</package-name>
 
-		<imglib2-cache.version>1.0.0-beta-13</imglib2-cache.version>
+		<scijava.jvm.version>21</scijava.jvm.version>
+		<maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+		<javadoc.skip>true</javadoc.skip>
+		<maven.javadoc.skip>${javadoc.skip}</maven.javadoc.skip>
+
+		<n5.version>3.2.0</n5.version>
+		<n5-hdf5.version>2.2.0</n5-hdf5.version>
+		<n5-google-cloud.version>4.1.0</n5-google-cloud.version>
+		<n5-aws-s3.version>4.1.2</n5-aws-s3.version>
+		<n5-zarr.version>1.3.3</n5-zarr.version>
+		<n5-imglib2.version>7.0.0</n5-imglib2.version>
+		<n5-universe.version>1.5.0</n5-universe.version>
+		<imglib2-label-multisets.version>0.13.2</imglib2-label-multisets.version>
+		<slf4j-api.version>1.7.36</slf4j-api.version>
+
+		<label-utilities.version>0.5.1</label-utilities.version>
+		<label-utilities-n5.version>0.3.2</label-utilities-n5.version>
+		<imglib2-mutex-watershed.version>0.1.2</imglib2-mutex-watershed.version>
+
+		<spark.version>3.5.1</spark.version>
+		<spark-core_2.12.version>${spark.version}</spark-core_2.12.version>
+		<jackson.version>2.15.4</jackson.version>
+
+		<enforcer.skip>true</enforcer.skip>
 	</properties>
 
 	<repositories>
@@ -97,27 +131,26 @@
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>label-utilities</artifactId>
-			<version>0.5.0</version>
+			<version>${label-utilities.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>label-utilities-n5</artifactId>
-			<version>0.3.1</version>
+			<version>${label-utilities-n5.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>imglib2-mutex-watershed</artifactId>
-			<version>0.1.2</version>
+			<version>${imglib2-mutex-watershed.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.spark</groupId>
 			<artifactId>spark-core_2.12</artifactId>
-			<version>3.2.1</version>
+			<version>${spark-core_2.12.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>net.imglib2</groupId>
 			<artifactId>imglib2</artifactId>
-			<version>5.13.0</version>
 		</dependency>
 		<dependency>
 			<groupId>net.imglib2</groupId>
@@ -129,18 +162,7 @@
 		</dependency>
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
-			<artifactId>n5</artifactId>
-			<version>2.2.0</version>
-		</dependency>
-		<dependency>
-			<groupId>org.janelia.saalfeldlab</groupId>
-			<artifactId>n5-imglib2</artifactId>
-			<version>4.3.0</version>
-		</dependency>
-		<dependency>
-			<groupId>org.janelia.saalfeldlab</groupId>
-			<artifactId>n5-hdf5</artifactId>
-			<version>1.0.4</version>
+			<artifactId>n5-universe</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>net.imglib2</groupId>
@@ -162,13 +184,18 @@
 			<artifactId>throwing-function</artifactId>
 			<version>1.5.1</version>
 		</dependency>
+
+		<!-- logging  -->
 		<dependency>
-			<groupId>com.fasterxml.jackson.core</groupId>
-			<artifactId>jackson-databind</artifactId>
-			<version>2.12.7.1</version>
+			<groupId>ch.qos.logback</groupId>
+			<artifactId>logback-core</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>ch.qos.logback</groupId>
+			<artifactId>logback-classic</artifactId>
 		</dependency>
 
-		<!-- test -->
+		<!-- test  -->
 		<dependency>
 			<groupId>junit</groupId>
 			<artifactId>junit</artifactId>
@@ -176,6 +203,29 @@
 		</dependency>
 
 	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<configuration>
+					<compilerArgs>
+						<arg>--add-opens=java.base/sun.nio.ch=ALL-UNNAMED</arg>
+					</compilerArgs>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<argLine>
+						--add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+					</argLine>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
 
 	<profiles>
 		<profile>
@@ -185,7 +235,6 @@
 					<plugin>
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-shade-plugin</artifactId>
-						<version>3.2.4</version>
 						<configuration>
 							<filters>
 								<filter>
@@ -244,7 +293,6 @@
 					<plugin>
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-shade-plugin</artifactId>
-						<version>3.2.4</version>
 						<configuration>
 							<filters>
 								<filter>
