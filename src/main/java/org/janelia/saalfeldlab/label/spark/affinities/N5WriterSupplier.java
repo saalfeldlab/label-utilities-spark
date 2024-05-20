@@ -5,7 +5,6 @@ import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
 
-import java.io.IOException;
 import java.io.Serializable;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -23,6 +22,7 @@ class N5WriterSupplier implements Supplier<N5Writer>, Serializable {
 	private final boolean serializeSpecialFloatingPointValues = true;
 
 	N5WriterSupplier(final String container, final boolean withPrettyPrinting, final boolean disableHtmlEscaping) {
+
 		this.container = container;
 		this.withPrettyPrinting = withPrettyPrinting;
 		this.disableHtmlEscaping = disableHtmlEscaping;
@@ -37,22 +37,27 @@ class N5WriterSupplier implements Supplier<N5Writer>, Serializable {
 	}
 
 	private GsonBuilder createaBuilder() {
+
 		return serializeSpecialFloatingPointValues(withPrettyPrinting(disableHtmlEscaping(new GsonBuilder())));
 	}
 
 	private GsonBuilder serializeSpecialFloatingPointValues(final GsonBuilder builder) {
+
 		return with(builder, this.serializeSpecialFloatingPointValues, GsonBuilder::serializeSpecialFloatingPointValues);
 	}
 
 	private GsonBuilder withPrettyPrinting(final GsonBuilder builder) {
+
 		return with(builder, this.withPrettyPrinting, GsonBuilder::setPrettyPrinting);
 	}
 
 	private GsonBuilder disableHtmlEscaping(final GsonBuilder builder) {
+
 		return with(builder, this.disableHtmlEscaping, GsonBuilder::disableHtmlEscaping);
 	}
 
 	private static GsonBuilder with(final GsonBuilder builder, boolean applyAction, Function<GsonBuilder, GsonBuilder> action) {
+
 		return applyAction ? action.apply(builder) : builder;
 	}
 }

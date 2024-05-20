@@ -8,7 +8,6 @@ import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.unionfind.IntArrayUnionFind;
 import net.imglib2.type.numeric.RealType;
 import net.imglib2.type.numeric.integer.UnsignedLongType;
-import net.imglib2.type.numeric.real.FloatType;
 import net.imglib2.util.Intervals;
 import net.imglib2.view.Views;
 
@@ -21,6 +20,7 @@ class SerializableMergeWatershedsMedianThresholdSupplier implements Supplier<Mer
 	private final double threshold;
 
 	public SerializableMergeWatershedsMedianThresholdSupplier(final double threshold) {
+
 		this.threshold = threshold;
 	}
 
@@ -81,7 +81,7 @@ class SerializableMergeWatershedsMedianThresholdSupplier implements Supplier<Mer
 				}
 			}
 
-			final IntArrayUnionFind uf = new IntArrayUnionFind((int) (maxId + 1));
+			final IntArrayUnionFind uf = new IntArrayUnionFind((int)(maxId + 1));
 
 			edgeAffinities.forEachEntry((l1, map) -> {
 				map.forEachEntry((l2, affinities) -> {
@@ -102,6 +102,7 @@ class SerializableMergeWatershedsMedianThresholdSupplier implements Supplier<Mer
 
 	@Override
 	public MergeWatersheds get() {
+
 		return new MW();
 	}
 }

@@ -1,19 +1,18 @@
 package org.janelia.saalfeldlab.label.spark.convert;
 
-import java.io.IOException;
-import java.lang.invoke.MethodHandles;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Optional;
-import java.util.concurrent.Callable;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import net.imglib2.FinalInterval;
+import net.imglib2.Interval;
+import net.imglib2.RandomAccessibleInterval;
+import net.imglib2.algorithm.util.Grids;
+import net.imglib2.converter.Converters;
+import net.imglib2.type.NativeType;
+import net.imglib2.type.label.FromIntegerTypeConverter;
+import net.imglib2.type.label.LabelMultisetType;
+import net.imglib2.type.numeric.IntegerType;
+import net.imglib2.util.Intervals;
+import net.imglib2.view.Views;
 import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -28,35 +27,30 @@ import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5LabelMultisets;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
-import org.janelia.saalfeldlab.n5.zarr.N5ZarrReader;
-import org.janelia.saalfeldlab.n5.zarr.ZArrayAttributes;
 import org.janelia.saalfeldlab.n5.zarr.ZarrKeyValueReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-
-import net.imglib2.FinalInterval;
-import net.imglib2.Interval;
-import net.imglib2.RandomAccessibleInterval;
-import net.imglib2.algorithm.util.Grids;
-import net.imglib2.converter.Converters;
-import net.imglib2.type.NativeType;
-import net.imglib2.type.label.FromIntegerTypeConverter;
-import net.imglib2.type.label.LabelMultisetType;
-import net.imglib2.type.numeric.IntegerType;
-import net.imglib2.util.Intervals;
-import net.imglib2.view.Views;
 import picocli.CommandLine;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import scala.Tuple2;
 
-public class ConvertToLabelMultisetType
-{
+import java.io.IOException;
+import java.lang.invoke.MethodHandles;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
-	private static final Logger LOG = LoggerFactory.getLogger( MethodHandles.lookup().lookupClass() );
+public class ConvertToLabelMultisetType {
+
+	private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
 	public static final String LABEL_MULTISETTYPE_KEY = "isLabelMultiset";
 
@@ -76,54 +70,52 @@ public class ConvertToLabelMultisetType
 
 	// TODO make this parallizable/spark and not hdf-to-n5 but convert between
 	// various instances of n5 instead
-	static public class CommandLineParameters implements Callable< Void >
-	{
-		@Option( names = { "--input-n5", "-i" }, paramLabel = "INPUT_N5", required = true, description = "Input N5 container. Currently supports N5 and HDF5." )
+	static public class CommandLineParameters implements Callable<Void> {
+		@Option(names = {"--input-n5", "-i"}, paramLabel = "INPUT_N5", required = true, description = "Input N5 container. Currently supports N5 and HDF5.")
 		private String inputN5;
 
-		@Option( names = { "--output-n5", "-o" }, paramLabel = "OUTPUT_N5", description = "Output N5 container. Defaults to INPUT_N5" )
+		@Option(names = {"--output-n5", "-o"}, paramLabel = "OUTPUT_N5", description = "Output N5 container. Defaults to INPUT_N5")
 		private String outputN5;
 
-		@Option( names = { "--dataset", "-d" }, paramLabel = "INPUT_DATASET", required = true, description = "Input dataset name (relative to INPUT_N5" )
+		@Option(names = {"--dataset", "-d"}, paramLabel = "INPUT_DATASET", required = true, description = "Input dataset name (relative to INPUT_N5")
 		private String inputDataset;
 
-		@Parameters( arity = "1", paramLabel = "OUTPUT_DATASET", description = "Output dataset name (relative to OUTPUT_N5)" )
+		@Parameters(arity = "1", paramLabel = "OUTPUT_DATASET", description = "Output dataset name (relative to OUTPUT_N5)")
 		private String outputDatasetName;
 
-		@Option( names = { "--block-size", "-b" }, paramLabel = "BLOCK_SIZE", description = "Size of cells to use in the output N5 dataset. Defaults to 64. Either single integer value for isotropic block size or comma-seperated list of block size per dimension", split = "," )
+		@Option(names = {"--block-size", "-b"}, paramLabel = "BLOCK_SIZE", description = "Size of cells to use in the output N5 dataset. Defaults to 64. Either single integer value for isotropic block size or comma-seperated list of block size per dimension", split = ",")
 		private int[] blockSize;
 
-		@Option( names = { "--compression", "-c" }, paramLabel = "COMPRESSION", description = "Compression type to use in output N5 dataset" )
+		@Option(names = {"--compression", "-c"}, paramLabel = "COMPRESSION", description = "Compression type to use in output N5 dataset")
 		public String compressionType = "{\"type\":\"gzip\",\"level\":-1}";
 
 		@Option(
-				names = { "--revert-array-attributes" },
+				names = {"--revert-array-attributes"},
 				required = false,
-				description = "When copying, revert all additional array attributes that are not dataset attributes. E.g. [3,2,1] -> [1,2,3]" )
+				description = "When copying, revert all additional array attributes that are not dataset attributes. E.g. [3,2,1] -> [1,2,3]")
 		private boolean revertArrayAttributes;
 
 		@Override
-		public Void call() throws IOException
-		{
-			this.blockSize = this.blockSize == null || this.blockSize.length == 0 ? new int[] { DEFAULT_BLOCK_SIZE } : this.blockSize;
+		public Void call() throws IOException {
+
+			this.blockSize = this.blockSize == null || this.blockSize.length == 0 ? new int[]{DEFAULT_BLOCK_SIZE} : this.blockSize;
 			this.outputN5 = this.outputN5 == null ? this.inputN5 : this.outputN5;
 
 			final Gson gson = new GsonBuilder()
-					.registerTypeHierarchyAdapter( Compression.class, CompressionAdapter.getJsonAdapter() )
+					.registerTypeHierarchyAdapter(Compression.class, CompressionAdapter.getJsonAdapter())
 					.create();
 			final Compression compression = new GzipCompression();// .fromJson(
-																	// compressionType,
-																	// Compression.class
-																	// );
-			final int nDim = N5Helpers.n5Reader( this.inputN5 ).getDatasetAttributes( this.inputDataset ).getNumDimensions();
-			final int[] blockSize = this.blockSize.length < nDim ? IntStream.generate( () -> this.blockSize[ 0 ] ).limit( nDim ).toArray() : this.blockSize;
+			// compressionType,
+			// Compression.class
+			// );
+			final int nDim = N5Helpers.n5Reader(this.inputN5).getDatasetAttributes(this.inputDataset).getNumDimensions();
+			final int[] blockSize = this.blockSize.length < nDim ? IntStream.generate(() -> this.blockSize[0]).limit(nDim).toArray() : this.blockSize;
 
 			final long startTime = System.currentTimeMillis();
 
-			final SparkConf conf = new SparkConf().setAppName( MethodHandles.lookup().lookupClass().getName() );
+			final SparkConf conf = new SparkConf().setAppName(MethodHandles.lookup().lookupClass().getName());
 
-			try (final JavaSparkContext sc = new JavaSparkContext( conf ))
-			{
+			try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
 				convertToLabelMultisetType(
 						sc,
 						inputN5,
@@ -132,34 +124,34 @@ public class ConvertToLabelMultisetType
 						outputN5,
 						outputDatasetName,
 						compression,
-						revertArrayAttributes );
+						revertArrayAttributes);
 			}
 
 			final long endTime = System.currentTimeMillis();
 
-			final String formattedTime = DurationFormatUtils.formatDuration( endTime - startTime, "HH:mm:ss.SSS" );
-			System.out.println( "Converted " + inputN5 + " to N5 dataset at " + outputN5 + " with name " + outputDatasetName +
-					" in " + formattedTime );
+			final String formattedTime = DurationFormatUtils.formatDuration(endTime - startTime, "HH:mm:ss.SSS");
+			System.out.println("Converted " + inputN5 + " to N5 dataset at " + outputN5 + " with name " + outputDatasetName +
+					" in " + formattedTime);
 			return null;
 
 		}
 
 	}
 
-	public static void main( final String... args ) throws IOException
-	{
-		run( args );
+	public static void main(final String... args) throws IOException {
+
+		run(args);
 	}
 
-	public static void run( final String... args ) throws IOException
-	{
-		System.out.println( "Command line arguments: " + Arrays.toString( args ) );
-		LOG.debug( "Command line arguments: ", Arrays.toString( args ) );
-		CommandLine.call( new CommandLineParameters(), System.err, args );
+	public static void run(final String... args) throws IOException {
+
+		System.out.println("Command line arguments: " + Arrays.toString(args));
+		LOG.debug("Command line arguments: ", Arrays.toString(args));
+		CommandLine.call(new CommandLineParameters(), System.err, args);
 
 	}
 
-	public static < I extends IntegerType< I > & NativeType< I > > void convertToLabelMultisetType(
+	public static <I extends IntegerType<I> & NativeType<I>> void convertToLabelMultisetType(
 			final JavaSparkContext sc,
 			final String inputGroup,
 			final String inputDataset,
@@ -167,13 +159,13 @@ public class ConvertToLabelMultisetType
 			final String outputGroupName,
 			final String outputDatasetName,
 			final Compression compression,
-			final boolean revert ) throws IOException
-	{
-		final N5Reader reader = N5Helpers.n5Reader( inputGroup, blockSize );
+			final boolean revert) throws IOException {
+
+		final N5Reader reader = N5Helpers.n5Reader(inputGroup, blockSize);
 		final DatasetAttributes inputDataAttrs = reader.getDatasetAttributes(inputDataset);
 		final int[] inputBlockSize = inputDataAttrs.getBlockSize();
-		final RandomAccessibleInterval< I > img = N5Utils.open( reader, inputDataset );
-		final Map< String, Class< ? > > attributeNames;
+		final RandomAccessibleInterval<I> img = N5Utils.open(reader, inputDataset);
+		final Map<String, Class<?>> attributeNames;
 		if (reader instanceof ZarrKeyValueReader) {
 			attributeNames = Optional.of(reader)
 					.map(ZarrKeyValueReader.class::cast)
@@ -193,75 +185,67 @@ public class ConvertToLabelMultisetType
 
 		final int nDim = img.numDimensions();
 
-		final long[] dimensions = new long[ nDim ];
-		img.dimensions( dimensions );
+		final long[] dimensions = new long[nDim];
+		img.dimensions(dimensions);
 
-		final N5Writer writer = N5Helpers.n5Writer( outputGroupName, blockSize );
-		final boolean outputDatasetExisted = writer.datasetExists( outputDatasetName );
-		if ( outputDatasetExisted )
-		{
-			final int[] existingBlockSize = writer.getDatasetAttributes( outputDatasetName ).getBlockSize();
-			if ( !Arrays.equals( blockSize, existingBlockSize ) )
-				throw new RuntimeException( "Cannot overwrite existing dataset when the block sizes are not the same." );
+		final N5Writer writer = N5Helpers.n5Writer(outputGroupName, blockSize);
+		final boolean outputDatasetExisted = writer.datasetExists(outputDatasetName);
+		if (outputDatasetExisted) {
+			final int[] existingBlockSize = writer.getDatasetAttributes(outputDatasetName).getBlockSize();
+			if (!Arrays.equals(blockSize, existingBlockSize))
+				throw new RuntimeException("Cannot overwrite existing dataset when the block sizes are not the same.");
 		}
-		writer.createDataset( outputDatasetName, dimensions, blockSize, DataType.UINT8, compression );
-		writer.setAttribute( outputDatasetName, LABEL_MULTISETTYPE_KEY, true );
-		for ( final Entry< String, Class< ? > > entry : attributeNames.entrySet() )
-			writer.setAttribute( outputDatasetName, entry.getKey(), N5Helpers.revertInplaceAndReturn( reader.getAttribute( inputDataset, entry.getKey(), entry.getValue() ), revert ) );
+		writer.createDataset(outputDatasetName, dimensions, blockSize, DataType.UINT8, compression);
+		writer.setAttribute(outputDatasetName, LABEL_MULTISETTYPE_KEY, true);
+		for (final Entry<String, Class<?>> entry : attributeNames.entrySet())
+			writer.setAttribute(outputDatasetName, entry.getKey(), N5Helpers.revertInplaceAndReturn(reader.getAttribute(inputDataset, entry.getKey(), entry.getValue()), revert));
 
-		final int[] parallelizeBlockSize = new int[ blockSize.length ];
-		if ( Intervals.numElements( blockSize ) >= Intervals.numElements( inputBlockSize ) )
-		{
-			Arrays.setAll( parallelizeBlockSize, d -> blockSize[ d ] );
-			LOG.debug( "Output block size {} is the same or bigger than the input block size {}, parallelizing over output blocks of size {}", blockSize, inputBlockSize, parallelizeBlockSize );
-		}
-		else
-		{
-			Arrays.setAll( parallelizeBlockSize, d -> ( int ) Math.max( Math.round( ( double ) inputBlockSize[ d ] / blockSize[ d ] ), 1 ) * blockSize[ d ] );
-			LOG.debug( "Output block size {} is smaller than the input block size {}, parallelizing over adjusted input blocks of size {}", blockSize, inputBlockSize, parallelizeBlockSize );
+		final int[] parallelizeBlockSize = new int[blockSize.length];
+		if (Intervals.numElements(blockSize) >= Intervals.numElements(inputBlockSize)) {
+			Arrays.setAll(parallelizeBlockSize, d -> blockSize[d]);
+			LOG.debug("Output block size {} is the same or bigger than the input block size {}, parallelizing over output blocks of size {}", blockSize, inputBlockSize, parallelizeBlockSize);
+		} else {
+			Arrays.setAll(parallelizeBlockSize, d -> (int)Math.max(Math.round((double)inputBlockSize[d] / blockSize[d]), 1) * blockSize[d]);
+			LOG.debug("Output block size {} is smaller than the input block size {}, parallelizing over adjusted input blocks of size {}", blockSize, inputBlockSize, parallelizeBlockSize);
 		}
 
-		final List< Tuple2< long[], long[] > > intervals = Grids.collectAllContainedIntervals( dimensions, parallelizeBlockSize )
+		final List<Tuple2<long[], long[]>> intervals = Grids.collectAllContainedIntervals(dimensions, parallelizeBlockSize)
 				.stream()
-				.map( interval -> new Tuple2<>( Intervals.minAsLongArray( interval ), Intervals.maxAsLongArray( interval ) ) )
-				.collect( Collectors.toList() );
+				.map(interval -> new Tuple2<>(Intervals.minAsLongArray(interval), Intervals.maxAsLongArray(interval)))
+				.collect(Collectors.toList());
 
 		final long maxId = sc
-				.parallelize( intervals, Math.min( intervals.size(), MAX_PARTITIONS ) )
-				.map( intervalMinMax -> {
-					final Interval interval = new FinalInterval( intervalMinMax._1(), intervalMinMax._2() );
+				.parallelize(intervals, Math.min(intervals.size(), MAX_PARTITIONS))
+				.map(intervalMinMax -> {
+					final Interval interval = new FinalInterval(intervalMinMax._1(), intervalMinMax._2());
 
-					@SuppressWarnings("unchecked")
-					final RandomAccessibleInterval< I > blockImg = Views.interval(
-							( RandomAccessibleInterval< I > ) N5Utils.open( N5Helpers.n5Reader( inputGroup, blockSize ), inputDataset ),
+					@SuppressWarnings("unchecked") final RandomAccessibleInterval<I> blockImg = Views.interval(
+							(RandomAccessibleInterval<I>)N5Utils.open(N5Helpers.n5Reader(inputGroup, blockSize), inputDataset),
 							interval
-						);
+					);
 
-					final FromIntegerTypeConverter< I > converter = new FromIntegerTypeConverter<>();
+					final FromIntegerTypeConverter<I> converter = new FromIntegerTypeConverter<>();
 					final LabelMultisetType type = FromIntegerTypeConverter.getAppropriateType();
 					long blockMaxId = Long.MIN_VALUE;
-					for ( final I i : Views.iterable( blockImg ) )
-					{
+					for (final I i : Views.iterable(blockImg)) {
 						final long il = i.getIntegerLong();
-						blockMaxId = Math.max( il, blockMaxId );
+						blockMaxId = Math.max(il, blockMaxId);
 					}
-					final RandomAccessibleInterval< LabelMultisetType > converted = Converters.convert( blockImg, converter, type );
+					final RandomAccessibleInterval<LabelMultisetType> converted = Converters.convert(blockImg, converter, type);
 
+					final N5Writer localWriter = N5Helpers.n5Writer(outputGroupName, blockSize);
 
-					final N5Writer localWriter = N5Helpers.n5Writer( outputGroupName, blockSize );
-
-					if ( outputDatasetExisted )
-					{
+					if (outputDatasetExisted) {
 						// Empty blocks will not be written out. Delete blocks to avoid remnant blocks if overwriting.
-						N5Utils.deleteBlock( converted, localWriter, outputDatasetName );
+						N5Utils.deleteBlock(converted, localWriter, outputDatasetName);
 					}
 
-					N5LabelMultisets.saveLabelMultisetNonEmptyBlock( converted, localWriter, outputDatasetName );
+					N5LabelMultisets.saveLabelMultisetNonEmptyBlock(converted, localWriter, outputDatasetName);
 
 					return blockMaxId;
-				} )
-				.max( Comparator.naturalOrder() );
+				})
+				.max(Comparator.naturalOrder());
 
-		writer.setAttribute( outputDatasetName, MAX_ID_KEY, maxId );
+		writer.setAttribute(outputDatasetName, MAX_ID_KEY, maxId);
 	}
 }

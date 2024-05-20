@@ -84,9 +84,8 @@ public class SparkMutexWatersheds {
 		@CommandLine.Option(names = {"--overwrite-existing"})
 		boolean overwriteExisting = false;
 
-
-
 		public static void main(String... args) {
+
 			new CommandLine(new CREMI()).execute(args);
 		}
 
@@ -94,21 +93,20 @@ public class SparkMutexWatersheds {
 		public Integer call() throws IOException {
 
 			if (blockSize.length == 1)
-				blockSize = new int[] {blockSize[0], blockSize[0], blockSize[0]};
+				blockSize = new int[]{blockSize[0], blockSize[0], blockSize[0]};
 
 			if (blocksPerTask.length == 1)
-				blocksPerTask = new int[] {blocksPerTask[0], blocksPerTask[0], blocksPerTask[0]};
+				blocksPerTask = new int[]{blocksPerTask[0], blocksPerTask[0], blocksPerTask[0]};
 
 			if (superBlocksPerTask.length == 1)
-				superBlocksPerTask = new int[] {superBlocksPerTask[0], superBlocksPerTask[0], superBlocksPerTask[0]};
-
+				superBlocksPerTask = new int[]{superBlocksPerTask[0], superBlocksPerTask[0], superBlocksPerTask[0]};
 
 			final SparkConf conf = new SparkConf().setAppName(CREMI.class.getName());
 			try (final JavaSparkContext sc = new JavaSparkContext(conf)) {
 				for (final int iteration : iterations) {
 					for (final int setup : setups) {
 						final String basePath = basePathFor(setup, iteration);
-						for (final String sample: samples) {
+						for (final String sample : samples) {
 							final String containerPath = containerPathFor(sample);
 							final String gliaDataset = gliaFrom(basePath);
 							final long[] outputSize = Intervals.dimensionsAsLongArray(N5Utils.open(new N5FSReader(containerPath), gliaDataset));
@@ -155,48 +153,59 @@ public class SparkMutexWatersheds {
 				{0, 0, -1}, {0, 0, -2}, {0, 0, -5}, {0, 0, -10}};
 
 		private static String containerPathFor(final String sample) {
+
 			return String.format(CONTAINER_PATTERN, sample);
 		}
 
 		private static String basePathFor(final int setup, final int iteration) {
+
 			return String.format(BASE_PATH_PATTERN, setup, iteration);
 		}
 
 		private static String datasetFrom(final String basePath, final String datasetName) {
+
 			return String.format("%s/%s", basePath, datasetName);
 		}
 
 		private static String affinitiesFrom(final String basePath) {
+
 			return datasetFrom(basePath, "affinities");
 		}
 
 		private static String gliaFrom(final String basePath) {
+
 			return datasetFrom(basePath, "glia");
 		}
 
 		private static String mutexWatershedDatasetFrom(final String basePath, final Double threshold) {
+
 			return String.format("%s/%s", basePath, mutexWatershedDatasetFrom(threshold));
 		}
 
 		private static String mutexWatershedRelabeledDatasetFrom(final String basePath, final Double threshold) {
+
 			return String.format("%s/%s", basePath, mutexWatershedRelabeledDatasetFrom(threshold));
 		}
 
 		private static String mutexWatershedMergedDatasetFrom(final String basePath, final Double threshold) {
+
 			return String.format("%s/%s", basePath, mutexWatershedMergedDatasetFrom(threshold));
 		}
 
 		private static String mutexWatershedDatasetFrom(final Double threshold) {
+
 			return (threshold == null)
 					? "mutex-watershed"
 					: String.format("mutex-watershed-threshold=%s", threshold);
 		}
 
 		private static String mutexWatershedRelabeledDatasetFrom(final Double threshold) {
+
 			return String.format("%s-relabeled", mutexWatershedDatasetFrom(threshold));
 		}
 
 		private static String mutexWatershedMergedDatasetFrom(final Double threshold) {
+
 			return String.format("%s-merged", mutexWatershedDatasetFrom(threshold));
 		}
 	}
@@ -208,7 +217,7 @@ public class SparkMutexWatersheds {
 		final String outputDataset = "mutex-watershed";
 		final String relabeledDataset = "mutex-watershed-relabeled";
 		final String mergedDataset = "mutex-watershed-merged";
-		final long[] outputSize = new long[] {256, 256, 256};//Intervals.dimensionsAsLongArray(Views.collapse(N5Utils.<FloatType>open(new N5FSReader(containerPath), dataset)));
+		final long[] outputSize = new long[]{256, 256, 256};//Intervals.dimensionsAsLongArray(Views.collapse(N5Utils.<FloatType>open(new N5FSReader(containerPath), dataset)));
 		final N5WriterSupplier container = new N5WriterSupplier(containerPath);
 
 		final SparkConf conf = new SparkConf().setAppName(SparkMutexWatersheds.class.getName());
@@ -225,17 +234,17 @@ public class SparkMutexWatersheds {
 			runMutexWatersheds(
 					sc,
 					affinitiesSupplier,
-					(Serializable & Supplier<RandomAccessible<UnsignedLongType>>) () -> ConstantUtils.constantRandomAccessible(new UnsignedLongType(1), 3),
-					(Serializable & Supplier<RandomAccessible<FloatType>>) () -> ConstantUtils.constantRandomAccessible(new FloatType(0.0f), 3),
+					(Serializable & Supplier<RandomAccessible<UnsignedLongType>>)() -> ConstantUtils.constantRandomAccessible(new UnsignedLongType(1), 3),
+					(Serializable & Supplier<RandomAccessible<FloatType>>)() -> ConstantUtils.constantRandomAccessible(new FloatType(0.0f), 3),
 					container,
 					outputDataset,
 					relabeledDataset,
 					mergedDataset,
 					null,
 					outputSize,
-					new int[] {64, 64, 64},
-					new int[] {1, 1, 1},
-					new int[] {3, 3, 3},
+					new int[]{64, 64, 64},
+					new int[]{1, 1, 1},
+					new int[]{3, 3, 3},
 					offsets);
 			final double[] resolution = container.get().getAttribute(dataset, "resolution", double[].class);
 			if (resolution != null) {
@@ -271,6 +280,7 @@ public class SparkMutexWatersheds {
 			final int[] superBlocksPerTask,
 			final boolean overwriteExisting,
 			final long[]... offsets) throws IOException {
+
 		runMutexWatersheds(
 				sc,
 				container,
@@ -314,6 +324,7 @@ public class SparkMutexWatersheds {
 			final int[] superBlocksPerTask,
 			final boolean overwriteExisting,
 			final long[]... offsets) throws IOException {
+
 		final N5WriterSupplier outputContainerSupplier = new N5WriterSupplier(outputContainer);
 		if (outputContainerSupplier.get().datasetExists(mutexWatershedMergedDataset)
 				&& Optional.ofNullable(outputContainerSupplier.get().getAttribute(mutexWatershedMergedDataset, "completedSuccessfully", Boolean.class)).orElse(false)
@@ -410,8 +421,8 @@ public class SparkMutexWatersheds {
 						final RandomAccessibleInterval<FloatType> affinitiesCopy = ArrayImgs.floats(Intervals.dimensionsAsLongArray(affinitiesInterval));
 						for (int channel = 0; channel < numChannels; ++channel) {
 							final long[] channelOffset = offsets[channel];
-							final RandomAccessibleInterval<A> affinitiesSlice = Views.hyperSlice(affinitiesInterval, numDims, (long) channel);
-							final RandomAccessibleInterval<FloatType> affinitiesCopySlice = Views.hyperSlice(affinitiesCopy, numDims, (long) channel);
+							final RandomAccessibleInterval<A> affinitiesSlice = Views.hyperSlice(affinitiesInterval, numDims, (long)channel);
+							final RandomAccessibleInterval<FloatType> affinitiesCopySlice = Views.hyperSlice(affinitiesCopy, numDims, (long)channel);
 							final RandomAccessibleInterval<M> maskTo = Views.interval(mask, Intervals.translate(block, channelOffset));
 							final RandomAccessibleInterval<G> gliaTo = Views.interval(glia, Intervals.translate(block, channelOffset));
 
@@ -430,15 +441,15 @@ public class SparkMutexWatersheds {
 						}
 						sw1.stop();
 						System.out.println("Prepared affinities in " + StopWatch.secondsToString(sw1.seconds()));
-//					return new Tuple2<>(bwo, affinitiesCopy);
-//				})
-//				.mapToPair(t -> {
+						//					return new Tuple2<>(bwo, affinitiesCopy);
+						//				})
+						//				.mapToPair(t -> {
 						final RandomAccessibleInterval<FloatType> affinities = affinitiesCopy;
 						final RandomAccessibleInterval<UnsignedLongType> target = ArrayImgs.unsignedLongs(Intervals.dimensionsAsLongArray(block));
 
 						final double[] edgeProbabilities = Stream
 								.of(offsets)
-								.mapToDouble(o -> squaredSum(o) <= 1 ? 1.0:0.01)
+								.mapToDouble(o -> squaredSum(o) <= 1 ? 1.0 : 0.01)
 								.toArray();
 
 						final long seed = IntervalIndexer.positionToIndex(min, outputSize);
@@ -463,14 +474,13 @@ public class SparkMutexWatersheds {
 									rng::nextDouble);
 						}
 						sw.stop();
-//						System.out.println("Ran mutex watersheds in " + StopWatch.secondsToString(sw.seconds()));
+						//						System.out.println("Ran mutex watersheds in " + StopWatch.secondsToString(sw.seconds()));
 
 						final TLongLongHashMap counts = new TLongLongHashMap();
 						Views.flatIterable(target).forEach(px -> {
 							final long v = px.getIntegerLong();
 							counts.put(v, counts.get(v) + 1);
 						});
-
 
 						long index = 1L;
 						final TLongLongMap mapping = new TLongLongHashMap();
@@ -620,7 +630,6 @@ public class SparkMutexWatersheds {
 								t.setInteger(mapping.containsKey(k) ? mapping.get(k) : k);
 							});
 
-
 					final long[] blockOffset = new long[bwo.min.length];
 					Arrays.setAll(blockOffset, d -> bwo.min[d] / blockSize[d]);
 					final DatasetAttributes attributes = new DatasetAttributes(outputSize, blockSize, DataType.UINT64, new GzipCompression());
@@ -631,10 +640,10 @@ public class SparkMutexWatersheds {
 		// Success!!
 		outputContainer.get().setAttribute(mutexWatershedMergedDataset, "completedSuccessfully", true);
 
-
 	}
 
 	private static TLongLongMap argMaxes(final TLongObjectMap<TLongLongMap> counts) {
+
 		final TLongLongMap argMaxes = new TLongLongHashMap();
 		counts.forEachEntry((key, value) -> {
 			long argMax = -1;
@@ -656,6 +665,7 @@ public class SparkMutexWatersheds {
 	}
 
 	private static void incrementFor(final TLongObjectMap<TLongLongMap> counts, final long from, final long to) {
+
 		if (!counts.containsKey(from))
 			counts.put(from, new TLongLongHashMap());
 		final TLongLongMap toCounts = counts.get(from);
@@ -663,6 +673,7 @@ public class SparkMutexWatersheds {
 	}
 
 	private static long squaredSum(long... values) {
+
 		long sum = 0;
 		for (long v : values)
 			sum += v * v;
@@ -670,6 +681,7 @@ public class SparkMutexWatersheds {
 	}
 
 	private static boolean[] attractiveEdges(long[]... offsets) {
+
 		final boolean[] attractiveEdges = new boolean[offsets.length];
 		for (int d = 0; d < offsets.length; ++d)
 			attractiveEdges[d] = squaredSum(offsets[d]) <= 1L;
@@ -685,11 +697,13 @@ public class SparkMutexWatersheds {
 		private final String containerPath;
 
 		private N5WriterSupplier(final String containerPath) {
+
 			this.containerPath = containerPath;
 		}
 
 		@Override
 		public N5FSWriter get() {
+
 			return new N5FSWriter(containerPath);
 		}
 	}
@@ -699,11 +713,13 @@ public class SparkMutexWatersheds {
 		private final String containerPath;
 
 		private N5ReaderSupplier(final String containerPath) {
+
 			this.containerPath = containerPath;
 		}
 
 		@Override
 		public N5FSReader get() {
+
 			return new N5FSReader(containerPath);
 		}
 	}
@@ -716,19 +732,21 @@ public class SparkMutexWatersheds {
 		private ZeroExtendedSupplier(
 				final SerializableSupplier<? extends N5Reader> container,
 				final String dataset) {
+
 			this.container = container;
 			this.dataset = dataset;
 		}
 
 		@Override
 		public RandomAccessible<T> get() {
+
 			final N5Reader container = this.container.get();
 			final double[] offset = container.getAttribute(dataset, "offset", double[].class);
-			if (offset == null || Arrays.stream(offset).allMatch(d -> d ==0.0))
+			if (offset == null || Arrays.stream(offset).allMatch(d -> d == 0.0))
 				return Views.extendZero(N5Utils.<T>open(container, dataset));
-			final double[] resolution = Optional.ofNullable(container.getAttribute(dataset, "resolution", double[].class)).orElse(new double[] {1.0, 1.0, 1.0});
+			final double[] resolution = Optional.ofNullable(container.getAttribute(dataset, "resolution", double[].class)).orElse(new double[]{1.0, 1.0, 1.0});
 			final long[] offsetInVoxels = new long[offset.length];
-			Arrays.setAll(offsetInVoxels, d -> (long) (offset[d] / resolution[d]));
+			Arrays.setAll(offsetInVoxels, d -> (long)(offset[d] / resolution[d]));
 			return Views.extendZero(Views.translate(N5Utils.<T>open(container, dataset), offsetInVoxels));
 		}
 	}
@@ -740,32 +758,38 @@ public class SparkMutexWatersheds {
 		public final long[] max;
 
 		public IntervalWithOffset(long[] min, long[] max) {
+
 			this.min = min;
 			this.max = max;
 		}
 
 		public IntervalWithOffset(final Interval interval) {
+
 			this(Intervals.minAsLongArray(interval), Intervals.maxAsLongArray(interval));
 		}
 
 		@Override
 		public int hashCode() {
+
 			return Arrays.hashCode(this.min);
 		}
 
 		@Override
 		public boolean equals(final Object other) {
+
 			return other instanceof IntervalWithOffset && Arrays.equals(min, ((IntervalWithOffset)other).min);
 		}
 	}
 
 	private static <T extends NumericType<T>> boolean anyZero(final RandomAccessibleInterval<T> rai) {
+
 		final T zero = Util.getTypeFromInterval(rai);
 		zero.setZero();
 		return anyMatches(Views.iterable(rai), zero);
 	}
 
 	private static <T extends NumericType<T>> boolean anyMatches(final Iterable<T> iterable, final T comp) {
+
 		for (final T t : iterable)
 			if (t.valueEquals(comp))
 				return true;
