@@ -96,7 +96,8 @@
 
 		<scijava.jvm.version>21</scijava.jvm.version>
 		<maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
-
+		<javadoc.skip>true</javadoc.skip>
+		
 		<n5.version>3.2.0</n5.version>
 		<n5-hdf5.version>2.2.0</n5-hdf5.version>
 		<n5-google-cloud.version>4.1.0</n5-google-cloud.version>
