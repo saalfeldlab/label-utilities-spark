@@ -7,6 +7,7 @@ import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.cell.Cell;
 import net.imglib2.img.cell.CellGrid;
+import net.imglib2.type.NativeType;
 import net.imglib2.type.label.LabelMultisetType;
 import net.imglib2.type.label.VolatileLabelMultisetArray;
 import net.imglib2.type.numeric.IntegerType;
@@ -68,7 +69,7 @@ public class ExtractAndStoreLabelList implements Function<Tuple2<long[], long[]>
 		return callImpl(dims, blockSize, inputN5, inputDataset, outputN5, outputDataset, isMultisetType, minMax);
 	}
 
-	private static <I extends IntegerType<I>> RandomAccessibleInterval<I> getData(
+	private static <I extends IntegerType<I> & NativeType<I>> RandomAccessibleInterval<I> getData(
 			final Interval interval,
 			final int[] blockSize,
 			final CellGrid grid,
@@ -90,13 +91,13 @@ public class ExtractAndStoreLabelList implements Function<Tuple2<long[], long[]>
 			img = img2;
 		} else {
 			img = Views.interval(
-					(RandomAccessibleInterval<I>)N5Utils.open(n5reader, inputDataset),
+					N5Utils.<I>open(n5reader, inputDataset),
 					interval);
 		}
 		return img;
 	}
 
-	private static <I extends IntegerType<I>> long callImpl(
+	private static <I extends IntegerType<I> & NativeType<I>> long callImpl(
 			final long[] dims,
 			final int[] blockSize,
 			final String inputN5,
