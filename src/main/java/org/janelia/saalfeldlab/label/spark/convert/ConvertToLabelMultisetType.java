@@ -90,10 +90,10 @@ public class ConvertToLabelMultisetType {
 		public String compressionType = "{\"type\":\"gzip\",\"level\":-1}";
 
 		@Option(
-				names = {"--revert-array-attributes"},
+				names = {"--reverse-array-attributes"},
 				required = false,
-				description = "When copying, revert all additional array attributes that are not dataset attributes. E.g. [3,2,1] -> [1,2,3]")
-		private boolean revertArrayAttributes;
+				description = "When copying, reverse all additional array attributes that are not dataset attributes. E.g. [3,2,1] -> [1,2,3]")
+		private boolean reverseArrayAttributes;
 
 		@Override
 		public Void call() throws IOException {
@@ -124,7 +124,7 @@ public class ConvertToLabelMultisetType {
 						outputN5,
 						outputDatasetName,
 						compression,
-						revertArrayAttributes);
+						reverseArrayAttributes);
 			}
 
 			final long endTime = System.currentTimeMillis();
@@ -159,7 +159,7 @@ public class ConvertToLabelMultisetType {
 			final String outputGroupName,
 			final String outputDatasetName,
 			final Compression compression,
-			final boolean revert) throws IOException {
+			final boolean reverse) throws IOException {
 
 		final N5Reader reader = N5Helpers.n5Reader(inputGroup, blockSize);
 		final DatasetAttributes inputDataAttrs = reader.getDatasetAttributes(inputDataset);
@@ -198,7 +198,7 @@ public class ConvertToLabelMultisetType {
 		writer.createDataset(outputDatasetName, dimensions, blockSize, DataType.UINT8, compression);
 		writer.setAttribute(outputDatasetName, LABEL_MULTISETTYPE_KEY, true);
 		for (final Entry<String, Class<?>> entry : attributeNames.entrySet())
-			writer.setAttribute(outputDatasetName, entry.getKey(), N5Helpers.revertInplaceAndReturn(reader.getAttribute(inputDataset, entry.getKey(), entry.getValue()), revert));
+			writer.setAttribute(outputDatasetName, entry.getKey(), N5Helpers.reverseInplaceAndReturn(reader.getAttribute(inputDataset, entry.getKey(), entry.getValue()), reverse));
 
 		final int[] parallelizeBlockSize = new int[blockSize.length];
 		if (Intervals.numElements(blockSize) >= Intervals.numElements(inputBlockSize)) {

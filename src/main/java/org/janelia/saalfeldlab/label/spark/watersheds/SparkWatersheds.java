@@ -162,8 +162,8 @@ public class SparkWatersheds {
 		Boolean relabel;
 
 		@Expose
-		@CommandLine.Option(names = "--revert-array-attributes", paramLabel = "RELABEL", description = "Revert all array attributes (that are not dataset attributes)", defaultValue = "false")
-		Boolean revertArrayAttributes;
+		@CommandLine.Option(names = "--reverse-array-attributes", paramLabel = "RELABEL", description = "Reverse all array attributes (that are not dataset attributes)", defaultValue = "false")
+		Boolean reverseArrayAttributes;
 
 		@CommandLine.Option(names = "--json-pretty-print", defaultValue = "true")
 		transient Boolean prettyPrint;
@@ -220,8 +220,8 @@ public class SparkWatersheds {
 		String[] uint64Datasets = {args.merged, args.seededWatersheds, args.watershedSeeds, args.blockMerged};
 		String[] uint8Datasets = {};
 
-		final double[] resolution = reverted(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)), args.revertArrayAttributes);
-		final double[] offset = reverted(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]), args.revertArrayAttributes);
+		final double[] resolution = reversed(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, RESOLUTION_KEY, double[].class)).orElse(ones(outputDims.length)), args.reverseArrayAttributes);
+		final double[] offset = reversed(Optional.ofNullable(n5in.get().getAttribute(args.averagedAffinities, OFFSET_KEY, double[].class)).orElse(new double[outputDims.length]), args.reverseArrayAttributes);
 		attributes.put(RESOLUTION_KEY, resolution);
 		attributes.put(OFFSET_KEY, offset);
 
@@ -680,12 +680,12 @@ public class SparkWatersheds {
 		return String.format("(%s %s)", Arrays.toString(Intervals.minAsLongArray(interval)), Arrays.toString(Intervals.maxAsLongArray(interval)));
 	}
 
-	private static double[] reverted(final double[] array, final boolean revert) {
+	private static double[] reversed(final double[] array, final boolean reverse) {
 
-		return revert ? reverted(array) : array;
+		return reverse ? reversed(array) : array;
 	}
 
-	private static double[] reverted(final double[] array) {
+	private static double[] reversed(final double[] array) {
 
 		final double[] copy = new double[array.length];
 		for (int i = 0, k = copy.length - 1; i < copy.length; ++i, --k) {

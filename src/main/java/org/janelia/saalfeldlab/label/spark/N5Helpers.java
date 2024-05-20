@@ -95,9 +95,9 @@ public class N5Helpers {
 		});
 	}
 
-	public static <T> T revertInplaceAndReturn(final T t, final boolean revert) {
+	public static <T> T reverseInplaceAndReturn(final T t, final boolean reverse) {
 
-		if (!revert) {
+		if (!reverse) {
 			return t;
 		}
 
