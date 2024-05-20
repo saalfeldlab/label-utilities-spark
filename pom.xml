@@ -9,7 +9,7 @@
 
 	<groupId>org.janelia.saalfeldlab</groupId>
 	<artifactId>label-utilities-spark</artifactId>
-	<version>0.10.0-SNAPSHOT</version>
+	<version>1.0.0-SNAPSHOT</version>
 
 	<name>N5-Label-Multisets-Spark</name>
 	<description>Spark based tools for label data.</description>
@@ -18,7 +18,7 @@
 	<!-- <organization>saalfeldlab</organization> -->
 	<organization>
 		<name>Saalfeld Lab</name>
-		<url>http://saalfeldlab.janelia.org/</url>
+		<url>https://saalfeldlab.janelia.org/</url>
 	</organization>
 	<licenses>
 		<license>
@@ -30,7 +30,7 @@
 	<mailingLists>
 		<mailingList>
 			<name>ImageJ Forum</name>
-			<archive>http://image.sc/</archive>
+			<archive>https://image.sc/</archive>
 		</mailingList>
 	</mailingLists>
 
@@ -38,7 +38,7 @@
 		<developer>
 			<id>hanslovsky</id>
 			<name>Philipp Hanslovsky</name>
-			<url>http://imagej.net/User:Hanslovsky</url>
+			<url>https://imagej.net/User:Hanslovsky</url>
 			<roles>
 				<role>founder</role>
 				<role>lead</role>
@@ -158,26 +158,10 @@
 			<groupId>net.imglib2</groupId>
 			<artifactId>imglib2-algorithm</artifactId>
 		</dependency>
-<!--		<dependency>-->
-<!--			<groupId>org.janelia.saalfeldlab</groupId>-->
-<!--			<artifactId>n5</artifactId>-->
-<!--			<version>2.2.0</version>-->
-<!--		</dependency>-->
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>n5-universe</artifactId>
-			<version>1.1.0</version>
 		</dependency>
-<!--		<dependency>-->
-<!--			<groupId>org.janelia.saalfeldlab</groupId>-->
-<!--			<artifactId>n5-imglib2</artifactId>-->
-			<!--			<version>4.3.0</version>-->
-<!--		</dependency>-->
-<!--		<dependency>-->
-<!--			<groupId>org.janelia.saalfeldlab</groupId>-->
-<!--			<artifactId>n5-hdf5</artifactId>-->
-<!--			<version>1.0.4</version>-->
-<!--		</dependency>-->
 		<dependency>
 			<groupId>net.imglib2</groupId>
 			<artifactId>imglib2-label-multisets</artifactId>
@@ -199,12 +183,7 @@
 			<version>1.5.1</version>
 		</dependency>
 
-		<!-- test -->
-		<dependency>
-			<groupId>junit</groupId>
-			<artifactId>junit</artifactId>
-			<scope>test</scope>
-		</dependency>
+		<!-- logging  -->
 		<dependency>
 			<groupId>ch.qos.logback</groupId>
 			<artifactId>logback-core</artifactId>
@@ -212,6 +191,13 @@
 		<dependency>
 			<groupId>ch.qos.logback</groupId>
 			<artifactId>logback-classic</artifactId>
+		</dependency>
+
+		<!-- test  -->
+		<dependency>
+			<groupId>junit</groupId>
+			<artifactId>junit</artifactId>
+			<scope>test</scope>
 		</dependency>
 
 	</dependencies>
@@ -232,7 +218,6 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
 					<argLine>
-						-Djna.library.path=/opt/homebrew/lib
 						--add-opens=java.base/sun.nio.ch=ALL-UNNAMED
 					</argLine>
 				</configuration>
