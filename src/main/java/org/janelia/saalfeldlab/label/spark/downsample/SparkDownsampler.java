@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.concurrent.Callable;
@@ -17,6 +18,7 @@ import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import com.google.gson.JsonObject;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.n5.Compression;
@@ -25,6 +27,7 @@ import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.N5FSReader;
 import org.janelia.saalfeldlab.n5.N5FSWriter;
+import org.janelia.saalfeldlab.n5.N5KeyValueReader;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.slf4j.Logger;
@@ -193,7 +196,7 @@ public class SparkDownsampler
 			int lastMaxNumEntries = -1;
 
 			final String finestScale = Paths.get( multiscaleGroup, "s0" ).toString();
-			final HashMap< String, JsonElement > attributeNames = writer.getAttributes( finestScale );
+			final Map< String, JsonElement > attributeNames = writer.getAttribute( finestScale, "/", JsonObject.class).asMap();
 			Arrays.asList( "dataType", "compression", "blockSize", "dimensions" ).forEach( attributeNames::remove );
 			for ( final Entry< String, JsonElement > entry : attributeNames.entrySet() )
 			{

@@ -382,13 +382,9 @@ public class MakePredictionMask {
 
 		@Override
 		public RandomAccessible<UnsignedByteType> get() {
-			try {
-				final RandomAccessibleInterval<IntegerType<?>> img = (RandomAccessibleInterval) N5Utils.open(n5.get(), dataset);
-				final RandomAccessibleInterval<UnsignedByteType> convertedImg = Converters.convert(img, (s, t) -> t.setInteger(s.getIntegerLong()), new UnsignedByteType());
-				return Views.extendValue(convertedImg, new UnsignedByteType(0));
-			} catch (IOException e) {
-				throw new RuntimeException(e);
-			}
+			final RandomAccessibleInterval<IntegerType<?>> img = (RandomAccessibleInterval) N5Utils.open(n5.get(), dataset);
+			final RandomAccessibleInterval<UnsignedByteType> convertedImg = Converters.convert(img, (s, t) -> t.setInteger(s.getIntegerLong()), new UnsignedByteType());
+			return Views.extendValue(convertedImg, new UnsignedByteType(0));
 		}
 
 	}

@@ -2,27 +2,35 @@ package org.janelia.saalfeldlab.label.spark.convert;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.apache.commons.lang.time.DurationFormatUtils;
+import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.CompressionAdapter;
 import org.janelia.saalfeldlab.n5.DataType;
+import org.janelia.saalfeldlab.n5.DatasetAttributes;
+import org.janelia.saalfeldlab.n5.GsonUtils;
 import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5LabelMultisets;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
+import org.janelia.saalfeldlab.n5.zarr.N5ZarrReader;
+import org.janelia.saalfeldlab.n5.zarr.ZArrayAttributes;
+import org.janelia.saalfeldlab.n5.zarr.ZarrKeyValueReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -162,16 +170,26 @@ public class ConvertToLabelMultisetType
 			final boolean revert ) throws IOException
 	{
 		final N5Reader reader = N5Helpers.n5Reader( inputGroup, blockSize );
-		final int[] inputBlockSize = reader.getDatasetAttributes( inputDataset ).getBlockSize();
+		final DatasetAttributes inputDataAttrs = reader.getDatasetAttributes(inputDataset);
+		final int[] inputBlockSize = inputDataAttrs.getBlockSize();
 		final RandomAccessibleInterval< I > img = N5Utils.open( reader, inputDataset );
-		final Map< String, Class< ? > > attributeNames = reader.listAttributes( inputDataset );
-		Arrays.asList(
-				LABEL_MULTISETTYPE_KEY,
-				DATA_TYPE_KEY,
-				COMPRESSION_KEY,
-				BLOCK_SIZE_KEY,
-				DIMENSIONS_KEY )
-				.forEach( attributeNames::remove );
+		final Map< String, Class< ? > > attributeNames;
+		if (reader instanceof ZarrKeyValueReader) {
+			attributeNames = Optional.of(reader)
+					.map(ZarrKeyValueReader.class::cast)
+					.map(it -> it.getZAttributes(inputDataset))
+					.map(GsonUtils::listAttributes)
+					.orElseGet(HashMap::new);
+		} else {
+			attributeNames = reader.listAttributes(inputDataset);
+			List.of(
+					LABEL_MULTISETTYPE_KEY,
+					DATA_TYPE_KEY,
+					COMPRESSION_KEY,
+					BLOCK_SIZE_KEY,
+					DIMENSIONS_KEY
+			).forEach(attributeNames::remove);
+		}
 
 		final int nDim = img.numDimensions();
 

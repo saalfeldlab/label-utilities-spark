@@ -610,13 +610,9 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 		@Override
 		public N5Writer get() {
 
-			try {
-				return Files.isDirectory(Paths.get(container))
-						? new N5FSWriter(container, createaBuilder())
-						: new N5HDF5Writer(container);
-			} catch (final IOException e) {
-				throw new RuntimeException(e);
-			}
+			return Files.isDirectory(Paths.get(container))
+					? new N5FSWriter(container, createaBuilder())
+					: new N5HDF5Writer(container);
 		}
 
 		private GsonBuilder createaBuilder() {

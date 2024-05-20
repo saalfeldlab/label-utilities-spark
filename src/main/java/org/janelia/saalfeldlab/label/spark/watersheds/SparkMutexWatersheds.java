@@ -690,11 +690,7 @@ public class SparkMutexWatersheds {
 
 		@Override
 		public N5FSWriter get() {
-			try {
-				return new N5FSWriter(containerPath);
-			} catch (IOException e) {
-				throw new RuntimeException(e);
-			}
+			return new N5FSWriter(containerPath);
 		}
 	}
 
@@ -708,11 +704,7 @@ public class SparkMutexWatersheds {
 
 		@Override
 		public N5FSReader get() {
-			try {
-				return new N5FSReader(containerPath);
-			} catch (IOException e) {
-				throw new RuntimeException(e);
-			}
+			return new N5FSReader(containerPath);
 		}
 	}
 
@@ -730,18 +722,14 @@ public class SparkMutexWatersheds {
 
 		@Override
 		public RandomAccessible<T> get() {
-			try {
-				final N5Reader container = this.container.get();
-				final double[] offset = container.getAttribute(dataset, "offset", double[].class);
-				if (offset == null || Arrays.stream(offset).allMatch(d -> d ==0.0))
-					return Views.extendZero(N5Utils.<T>open(container, dataset));
-				final double[] resolution = Optional.ofNullable(container.getAttribute(dataset, "resolution", double[].class)).orElse(new double[] {1.0, 1.0, 1.0});
-				final long[] offsetInVoxels = new long[offset.length];
-				Arrays.setAll(offsetInVoxels, d -> (long) (offset[d] / resolution[d]));
-				return Views.extendZero(Views.translate(N5Utils.<T>open(container, dataset), offsetInVoxels));
-			} catch (final IOException e) {
-				throw new RuntimeException(e);
-			}
+			final N5Reader container = this.container.get();
+			final double[] offset = container.getAttribute(dataset, "offset", double[].class);
+			if (offset == null || Arrays.stream(offset).allMatch(d -> d ==0.0))
+				return Views.extendZero(N5Utils.<T>open(container, dataset));
+			final double[] resolution = Optional.ofNullable(container.getAttribute(dataset, "resolution", double[].class)).orElse(new double[] {1.0, 1.0, 1.0});
+			final long[] offsetInVoxels = new long[offset.length];
+			Arrays.setAll(offsetInVoxels, d -> (long) (offset[d] / resolution[d]));
+			return Views.extendZero(Views.translate(N5Utils.<T>open(container, dataset), offsetInVoxels));
 		}
 	}
 

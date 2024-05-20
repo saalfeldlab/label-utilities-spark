@@ -6,12 +6,10 @@ import java.util.Arrays;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
-import org.janelia.saalfeldlab.n5.N5FSReader;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
+import org.janelia.saalfeldlab.n5.N5Exception;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
-import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Reader;
-import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
+import org.janelia.saalfeldlab.n5.universe.N5Factory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,12 +28,17 @@ public class N5Helpers
 
 	public static N5Reader n5Reader( final String base, final int... defaultCellDimensions ) throws IOException
 	{
-		return isHDF( base ) ? new N5HDF5Reader( base, defaultCellDimensions ) : new N5FSReader( base );
+
+		final var factory = new N5Factory();
+		factory.hdf5DefaultBlockSize(defaultCellDimensions);
+		return factory.openReader(base);
 	}
 
 	public static N5Writer n5Writer( final String base, final int... defaultCellDimensions ) throws IOException
 	{
-		return isHDF( base ) ? new N5HDF5Writer( base, defaultCellDimensions ) : new N5FSWriter( base );
+		final var factory = new N5Factory();
+		factory.hdf5DefaultBlockSize(defaultCellDimensions);
+		return factory.openWriter(base);
 	}
 
 	public static boolean isHDF( final String base )
@@ -68,7 +71,7 @@ public class N5Helpers
 					{
 						return n5.datasetExists( group + "/" + s );
 					}
-					catch ( final IOException e )
+					catch ( final N5Exception e )
 					{
 						return false;
 					}

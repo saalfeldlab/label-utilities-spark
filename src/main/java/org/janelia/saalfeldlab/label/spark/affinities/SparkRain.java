@@ -38,7 +38,7 @@ import net.imglib2.util.Intervals;
 import net.imglib2.util.Util;
 import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
-import org.apache.commons.lang.builder.ToStringBuilder;
+import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.PairFunction;
@@ -695,13 +695,9 @@ public class SparkRain {
 		@Override
 		public N5Writer get() {
 
-			try {
-				return Files.isDirectory(Paths.get(container))
-						? new N5FSWriter(container, createaBuilder())
-						: new N5HDF5Writer(container);
-			} catch (final IOException e) {
-				throw new RuntimeException(e);
-			}
+			return Files.isDirectory(Paths.get(container))
+					? new N5FSWriter(container, createaBuilder())
+					: new N5HDF5Writer(container);
 		}
 
 		private GsonBuilder createaBuilder() {
