@@ -220,7 +220,7 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
 					<argLine>
-						--add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+						-Djna.library.path=${jna.library.path} --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
 					</argLine>
 				</configuration>
 			</plugin>
