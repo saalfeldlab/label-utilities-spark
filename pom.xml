@@ -113,7 +113,7 @@
 		<label-utilities-n5.version>0.3.2</label-utilities-n5.version>
 		<imglib2-mutex-watershed.version>0.1.2</imglib2-mutex-watershed.version>
 
-		<spark.version>3.5.1</spark.version>
+		<spark.version>3.3.3</spark.version>
 		<spark-core_2.12.version>${spark.version}</spark-core_2.12.version>
 		<jackson.version>2.15.4</jackson.version>
 
@@ -284,7 +284,7 @@
 				<dependency>
 					<groupId>org.apache.spark</groupId>
 					<artifactId>spark-core_2.12</artifactId>
-					<version>3.2.1</version>
+					<version>3.3.3</version>
 					<scope>provided</scope>
 				</dependency>
 			</dependencies>
