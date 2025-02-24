@@ -3,15 +3,19 @@ package org.janelia.saalfeldlab.label.spark.uniquelabels.downsample;
 import gnu.trove.set.hash.TLongHashSet;
 import net.imglib2.Interval;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.algorithm.util.Singleton;
 import net.imglib2.util.Intervals;
+import org.apache.http.client.utils.URIBuilder;
+import org.apache.http.message.BasicNameValuePair;
 import org.apache.spark.api.java.function.VoidFunction;
+import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
-import org.janelia.saalfeldlab.n5.N5FSReader;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
+import org.janelia.saalfeldlab.n5.universe.StorageFormat;
 
+import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 
@@ -46,7 +50,14 @@ public class LabelListDownsampleFunction implements VoidFunction<Interval> {
 	@Override
 	public void call(final Interval interval) throws Exception {
 
-		final N5Reader reader = new N5FSReader(inputGroupName);
+		final URI inputGroupUri = StorageFormat.parseUri(inputGroupName).getB();
+		final String inputReaderCacheKey = new URIBuilder(inputGroupUri)
+				.setParameters(
+						new BasicNameValuePair("type", "reader"),
+						new BasicNameValuePair("group", "input"),
+						new BasicNameValuePair("call", "label-list-downsample-function")
+				).toString();
+		final N5Reader reader = Singleton.get( inputReaderCacheKey, () -> N5Helpers.n5Reader(inputGroupName));
 		final DatasetAttributes attr = reader.getDatasetAttributes(inputDatasetName);
 
 		final long[] sourceDimensions = attr.getDimensions();
@@ -74,9 +85,15 @@ public class LabelListDownsampleFunction implements VoidFunction<Interval> {
 			final LongArrayDataBlock source = (LongArrayDataBlock)reader.readBlock(inputDatasetName, attr, cellPos);
 			containedLabels.addAll(source.getData());
 		}
-		;
 
-		final N5Writer writer = new N5FSWriter(outputGroupName);
+		final URI outputGroupUri = StorageFormat.parseUri(outputGroupName).getB();
+		final String outputWriterCacheKey = new URIBuilder(outputGroupUri)
+				.setParameters(
+						new BasicNameValuePair("type", "writer"),
+						new BasicNameValuePair("group", "output"),
+						new BasicNameValuePair("call", "label-list-downsample-function")
+				).toString();
+		final N5Writer writer = Singleton.get( outputWriterCacheKey, () -> N5Helpers.n5Writer(outputGroupName));
 		final DatasetAttributes writerAttributes = writer.getDatasetAttributes(outputDatasetName);
 
 		final long[] writeLocation = new long[nDim];

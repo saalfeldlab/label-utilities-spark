@@ -5,10 +5,11 @@ import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.position.FunctionRandomAccessible;
 import net.imglib2.type.numeric.integer.UnsignedByteType;
 import net.imglib2.view.Views;
+import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
+import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 
 import java.io.IOException;
@@ -21,7 +22,7 @@ public class MakeEmptyMask {
 
 	public static void main(String[] args) throws IOException, ExecutionException, InterruptedException {
 
-		final N5FSWriter container = new N5FSWriter("/groups/saalfeld/home/hanslovskyp/data/cremi/sample_A+_padded_20160601-bs=64.n5");
+		final N5Writer container = N5Helpers.n5Writer("/groups/saalfeld/home/hanslovskyp/data/cremi/sample_A+_padded_20160601-bs=64.n5");
 		final String rawPath = "volumes/raw/data/s0";
 		final String maskPath = "volumes/masks/raw";
 

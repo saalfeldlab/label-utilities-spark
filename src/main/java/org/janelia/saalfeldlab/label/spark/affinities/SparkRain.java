@@ -16,6 +16,7 @@ import net.imglib2.algorithm.gauss3.Gauss3;
 import net.imglib2.algorithm.labeling.affinities.ConnectedComponents;
 import net.imglib2.algorithm.labeling.affinities.Watersheds;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.algorithm.util.Singleton;
 import net.imglib2.algorithm.util.unionfind.IntArrayUnionFind;
 import net.imglib2.converter.Converters;
 import net.imglib2.img.ImgFactory;
@@ -38,20 +39,22 @@ import net.imglib2.util.Util;
 import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
 import org.apache.commons.lang3.builder.ToStringBuilder;
+import org.apache.http.client.utils.URIBuilder;
+import org.apache.http.message.BasicNameValuePair;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.PairFunction;
+import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.label.spark.Version;
 import org.janelia.saalfeldlab.n5.DataBlock;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
-import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
+import org.janelia.saalfeldlab.n5.universe.N5Factory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
@@ -60,8 +63,6 @@ import scala.Tuple2;
 import java.io.IOException;
 import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -245,7 +246,7 @@ public class SparkRain {
 			final long numSpecifiedOffsetChannelIndices = Stream.of(offsets).filter(o -> o.channelIndex >= 0).count();
 
 			if (numSpecifiedOffsetChannelIndices == 0) {
-				final DatasetAttributes attributes = new N5FSWriter(inputContainer).getDatasetAttributes(affinities);
+				final DatasetAttributes attributes = N5Helpers.n5Writer(inputContainer).getDatasetAttributes(affinities);
 				if (attributes.getDimensions()[attributes.getNumDimensions() - 1] != this.offsets.length)
 					throw new Exception("Need to define all offsets when not specifying channel indices explicitly.");
 			} else if (numSpecifiedOffsetChannelIndices < offsets.length - 1)
@@ -472,11 +473,19 @@ public class SparkRain {
 					final DatasetAttributes watershedAttributes = new DatasetAttributes(outputDims, watershedBlockSize, DataType.UINT64, new GzipCompression());
 
 					LOG.debug("Saving cropped watersheds to {}", hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds);
-					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds, croppedAttributes, blockOffset);
+
+					final N5Writer n5Local = n5out.get();
+					final String cacheKey = new URIBuilder(n5Local.getURI()).setParameters(
+							new BasicNameValuePair("type", "writer"),
+							new BasicNameValuePair("call", "spark-rain")
+					).toString();
+					final N5Writer n5Writer = Singleton.get(cacheKey, () -> n5Local);
+
+					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5Writer, hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds, croppedAttributes, blockOffset);
 					if (hasHalo) {
 						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
 						LOG.debug("Saving watershed block with halo to {}", watersheds);
-						n5out.get().writeBlock(watersheds, watershedAttributes, dataBlock);
+						n5Writer.writeBlock(watersheds, watershedAttributes, dataBlock);
 					}
 
 					final ArrayImg<BitType, LongArray> um = ArrayImgs.bits(dims);
@@ -494,10 +503,10 @@ public class SparkRain {
 							toIndex);
 					Views.flatIterable(labels).forEach(vx -> vx.set(uf.findRoot(vx.getIntegerLong())));
 
-					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, merged) : merged, croppedAttributes, blockOffset);
+					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5Writer, hasHalo ? String.format(croppedDatasetPattern, merged) : merged, croppedAttributes, blockOffset);
 					if (hasHalo) {
 						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
-						n5out.get().writeBlock(merged, watershedAttributes, dataBlock);
+						n5Writer.writeBlock(merged, watershedAttributes, dataBlock);
 					}
 
 					final TIntIntHashMap counts = new TIntIntHashMap();
@@ -521,10 +530,10 @@ public class SparkRain {
 								vx.setInteger(0);
 						}
 						final RandomAccessibleInterval<UnsignedLongType> relevantLabels = Views.zeroMin(Views.interval(labels, relevantInterval));
-						N5Utils.saveBlock(relevantLabels, n5out.get(), hasHalo ? String.format(croppedDatasetPattern, sizeFiltered) : sizeFiltered, croppedAttributes, blockOffset);
+						N5Utils.saveBlock(relevantLabels, n5Writer, hasHalo ? String.format(croppedDatasetPattern, sizeFiltered) : sizeFiltered, croppedAttributes, blockOffset);
 						if (hasHalo) {
 							final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
-							n5out.get().writeBlock(sizeFiltered, watershedAttributes, dataBlock);
+							n5Writer.writeBlock(sizeFiltered, watershedAttributes, dataBlock);
 						}
 					}
 
@@ -535,7 +544,7 @@ public class SparkRain {
 					LOG.debug("Found watershed seeds {}", seeds);
 					final RandomAccessibleInterval<UnsignedByteType> watershedSeedsMaskImgUint8 = Converters.convert(watershedSeedsMaskImg, (src, tgt) -> tgt.set(src.get() ? 1 : 0), new UnsignedByteType());
 					final DatasetAttributes croppedWatershedSeedsAtributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT8, new GzipCompression());
-					N5Utils.saveBlock(Views.interval(watershedSeedsMaskImgUint8, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, croppedWatershedSeedsAtributes, blockOffset);
+					N5Utils.saveBlock(Views.interval(watershedSeedsMaskImgUint8, relevantInterval), n5Writer, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, croppedWatershedSeedsAtributes, blockOffset);
 					if (hasHalo) {
 						throw new UnsupportedOperationException("Need to implement halo support!");
 						//						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(watershedSeedsMaskImg), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
@@ -551,15 +560,17 @@ public class SparkRain {
 							new UnsignedLongType(0L),
 							aff -> !Double.isNaN(aff));
 
-					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5out.get(), hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, croppedAttributes, blockOffset);
+					N5Utils.saveBlock(Views.interval(labels, relevantInterval), n5Writer, hasHalo ? String.format(croppedDatasetPattern, seededWatersheds) : seededWatersheds, croppedAttributes, blockOffset);
 					if (hasHalo) {
 						final DataBlock<long[]> dataBlock = new LongArrayDataBlock(Intervals.dimensionsAsIntArray(labels), watershedsBlockOffset, labels.update(null).getCurrentStorageArray());
-						n5out.get().writeBlock(seededWatersheds, watershedAttributes, dataBlock);
+						n5Writer.writeBlock(seededWatersheds, watershedAttributes, dataBlock);
 					}
 
 					return new Tuple2<>(new Tuple2<>(Intervals.minAsLongArray(t._1()), Intervals.maxAsLongArray(t._1())), roots.length - 1);
 				})
 				.collect();
+
+		Singleton.clear();
 
 		long startIndex = 1;
 		final List<Tuple2<Tuple2<long[], long[]>, Long>> idOffsets = new ArrayList<>();
@@ -588,6 +599,8 @@ public class SparkRain {
 						return true;
 					})
 					.count();
+			Singleton.clear();
+
 			System.out.println("Relabeled " + numBlocks + " blocks");
 			final long maxId = startIndex;
 			final N5Writer n5 = n5out.get();
@@ -621,9 +634,25 @@ public class SparkRain {
 			final Interval interval,
 			final BiConsumer<T, T> idMapping) throws IOException {
 
-		final DatasetAttributes attributes = n5.getDatasetAttributes(dataset);
+		final String writerCacheKey = new URIBuilder(n5.getURI()).setParameters(
+				new BasicNameValuePair("type", "writer"),
+				new BasicNameValuePair("call", "spark-rain-relabel")
+		).toString();
+		final var writer = Singleton.get(writerCacheKey, () -> n5);
+
+		final DatasetAttributes attributes = writer.getDatasetAttributes(dataset);
 		final CellGrid grid = new CellGrid(attributes.getDimensions(), attributes.getBlockSize());
-		final RandomAccessibleInterval<T> data = Views.interval(N5Utils.<T>open(n5, dataset), interval);
+
+
+		final String labelsCacheKey = new URIBuilder(writer.getURI()).setParameters(
+				new BasicNameValuePair("call", "spark-rain-relabel"),
+				new BasicNameValuePair("dataset", dataset)
+		).toString();
+		final var img = Singleton.get(labelsCacheKey, () -> N5Utils.<T>open(writer, dataset));
+
+		final RandomAccessibleInterval<T> data = Views.interval(img, interval);
+
+
 		final RandomAccessibleInterval<T> copy = new ArrayImgFactory<>(Util.getTypeFromInterval(data).createVariable()).create(data);
 		for (net.imglib2.util.Pair<T, T> p : Views.interval(Views.pair(Views.zeroMin(data), copy), Views.zeroMin(data)))
 			idMapping.accept(p.getA(), p.getB());
@@ -631,7 +660,7 @@ public class SparkRain {
 		//		LoopBuilder.setImages(data, copy).forEachPixel(idMapping);
 		final long[] blockPos = Intervals.minAsLongArray(interval);
 		grid.getCellPosition(blockPos, blockPos);
-		N5Utils.saveBlock(copy, n5, dataset, attributes, blockPos);
+		N5Utils.saveBlock(copy, writer, dataset, attributes, blockPos);
 	}
 
 	private static void relabel(
@@ -704,12 +733,12 @@ public class SparkRain {
 		@Override
 		public N5Writer get() {
 
-			return Files.isDirectory(Paths.get(container))
-					? new N5FSWriter(container, createaBuilder())
-					: new N5HDF5Writer(container);
+			final N5Factory factory = N5Helpers.defaultFactory();
+			factory.gsonBuilder(createBuilder());
+			return factory.openWriter(container);
 		}
 
-		private GsonBuilder createaBuilder() {
+		private GsonBuilder createBuilder() {
 
 			return serializeSpecialFloatingPointValues(withPrettyPrinting(disableHtmlEscaping(new GsonBuilder())));
 		}
@@ -838,7 +867,13 @@ public class SparkRain {
 		@Override
 		public Tuple2<Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<FloatType>>> call(final Interval interval) throws Exception {
 
-			RandomAccessibleInterval<FloatType> affs = N5Utils.open(n5in.get(), affinities);
+			final N5Reader n5Local = n5in.get();
+			final String cacheKey = new URIBuilder(n5Local.getURI()).setParameters(
+					new BasicNameValuePair("affinities", affinities),
+					new BasicNameValuePair("call", "spark-rain")
+			).toString();
+			RandomAccessibleInterval<FloatType> affs = Singleton.get(cacheKey, () -> N5Helpers.openBounded(n5Local, affinities));
+
 			affs = invertAffinitiesAxis ? Views.zeroMin(Views.invertAxis(affs, affs.numDimensions() - 1)) : affs;
 
 			final Interval withHalo = Intervals.expand(interval, halo);

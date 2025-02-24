@@ -6,14 +6,13 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.label.spark.downsample.MinToInterval;
 import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.CompressionAdapter;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
-import org.janelia.saalfeldlab.n5.N5FSReader;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.slf4j.Logger;
@@ -114,7 +113,7 @@ public class LabelListDownsampler {
 			final int[][] factors,
 			final int[][] blockSizes) throws IOException {
 
-		final N5FSWriter writer = new N5FSWriter(n5);
+		final N5Writer writer = N5Helpers.n5Writer(n5);
 		addMultiScaleTag(writer, multiscaleGroup);
 		final String finestScale = Paths.get(multiscaleGroup, "s0").toString();
 		final Map<String, JsonElement> attributeNames = writer.getAttribute(finestScale, "/", JsonObject.class).asMap();
@@ -128,7 +127,7 @@ public class LabelListDownsampler {
 			final String currentScaleLevel = multiscaleGroup + "/s" + level;
 
 			LabelListDownsampler.downsample(sc,
-					new N5FSReader(n5),
+					N5Helpers.n5Reader(n5),
 					n5,
 					previousScaleLevel,
 					factors[factorIndex],
@@ -181,7 +180,7 @@ public class LabelListDownsampler {
 			}
 		}
 
-		final N5Writer writer = new N5FSWriter(outputGroupName);
+		final N5Writer writer = N5Helpers.n5Writer(outputGroupName);
 		final double[] previousDownsamplingFactor = Optional
 				.ofNullable(reader.getAttribute(readDatasetName, DOWNSAMPLING_FACTORS_KEY, double[].class))
 				.orElse(DoubleStream.generate(() -> 1.0).limit(nDim).toArray());

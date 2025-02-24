@@ -9,6 +9,7 @@ import net.imglib2.Interval;
 import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.algorithm.util.Singleton;
 import net.imglib2.converter.Converters;
 import net.imglib2.converter.RealDoubleConverter;
 import net.imglib2.converter.RealFloatConverter;
@@ -25,14 +26,15 @@ import net.imglib2.util.Intervals;
 import net.imglib2.util.StopWatch;
 import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
+import org.apache.http.client.utils.URIBuilder;
+import org.apache.http.message.BasicNameValuePair;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.DataBlock;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
-import org.janelia.saalfeldlab.n5.N5FSReader;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
@@ -138,7 +140,7 @@ public class AverageAffinities {
 		public Void call() throws Exception {
 
 			final long numSpecifiedOffsetChannelIndices = Stream.of(offsets).filter(o -> o.channelIndex() >= 0).count();
-			final DatasetAttributes attributes = new N5FSWriter(inputContainer).getDatasetAttributes(affinities);
+			final DatasetAttributes attributes = N5Helpers.n5Writer(inputContainer).getDatasetAttributes(affinities);
 
 			if (numSpecifiedOffsetChannelIndices == 0) {
 				if (attributes.getDimensions()[attributes.getNumDimensions() - 1] != this.offsets.length)
@@ -166,7 +168,7 @@ public class AverageAffinities {
 
 			if (networkFovDiff == null)
 				if (mask != null)
-					networkFovDiff = new N5FSReader(maskContainer).getAttribute(mask, MakePredictionMask.NETWORK_SIZE_DIFF_KEY, long[].class);
+					networkFovDiff = N5Helpers.n5Reader(maskContainer).getAttribute(mask, MakePredictionMask.NETWORK_SIZE_DIFF_KEY, long[].class);
 
 			if (networkFovDiff == null)
 				networkFovDiff = new long[3];
@@ -263,7 +265,17 @@ public class AverageAffinities {
 
 		Map<Tuple2<long[], long[]>, Boolean> returnCodes = sc
 				.parallelize(blocks)
-				.mapToPair(block -> new Tuple2<>(block, (RandomAccessibleInterval<FloatType>)N5Utils.open(n5InSupplier.get(), affinities)))
+				.mapToPair(block -> {
+					final N5Writer n5Local = n5InSupplier.get();
+					final String sourceCacheKey = new URIBuilder(n5Local.getURI())
+							.setParameters(
+									new BasicNameValuePair("type", "writer"),
+									new BasicNameValuePair("call", "average-affinities")
+							).toString();
+
+					final RandomAccessibleInterval<FloatType> source = Singleton.get(sourceCacheKey, () -> N5Utils.open(n5Local, affinities));
+					return new Tuple2<>(block, source);
+				})
 				.mapToPair(p -> {
 					boolean wasSuccessful = false;
 					final long[] min = p._1()._1();
@@ -501,26 +513,37 @@ public class AverageAffinities {
 
 		public RandomAccessible<UnsignedByteType> get() throws IOException {
 
-			RandomAccessibleInterval<UnsignedByteType> rai =
-					container.get().getDatasetAttributes(dataset).getDataType() == DataType.UINT8
-							? N5Utils.open(container.get(), dataset)
-							: getAsUnsignedByteType();
-			// TODO this assumes zero offset in the affinities, consider affinity offset instead!
-			final double[] resolution = Optional.ofNullable(container.get().getAttribute(dataset, "resolution", double[].class)).orElse(new double[]{1.0, 1.0, 1.0});
-			final double[] offset = Optional.ofNullable(container.get().getAttribute(dataset, "offset", double[].class)).orElse(new double[]{0.0, 0.0, 0.0});
-			final long[] longOffset = new long[3];
-			for (int d = 0; d < longOffset.length; ++d) {
-				final double r = offset[d] / resolution[d];
-				final long l = (long)r;
-				longOffset[d] = l;
-				assert r == l;
-			}
-			return Views.extendValue(Views.translate(rai, longOffset), new UnsignedByteType(0));
+			final String imgCacheKey = new URIBuilder(container.get().getURI())
+					.setParameters(
+							new BasicNameValuePair("type", "reader"),
+							new BasicNameValuePair("call", "mask-supplier"),
+							new BasicNameValuePair("step", "get-image")
+					).toString();
+
+			return Singleton.get(imgCacheKey, () -> {
+
+				final N5Writer n5Writer = container.get();
+				RandomAccessibleInterval<UnsignedByteType> rai = n5Writer.getDatasetAttributes(dataset).getDataType() == DataType.UINT8
+						? N5Helpers.openBounded(n5Writer, dataset)
+						: getAsUnsignedByteType(n5Writer);
+
+				// TODO this assumes zero offset in the affinities, consider affinity offset instead!
+				final double[] resolution = Optional.ofNullable(n5Writer.getAttribute(dataset, "resolution", double[].class)).orElse(new double[]{1.0, 1.0, 1.0});
+				final double[] offset = Optional.ofNullable(n5Writer.getAttribute(dataset, "offset", double[].class)).orElse(new double[]{0.0, 0.0, 0.0});
+				final long[] longOffset = new long[3];
+				for (int d = 0; d < longOffset.length; ++d) {
+					final double r = offset[d] / resolution[d];
+					final long l = (long)r;
+					longOffset[d] = l;
+					assert r == l;
+				}
+				return Views.extendValue(Views.translate(rai, longOffset), new UnsignedByteType(0));
+			});
 		}
 
-		private <I extends IntegerType<I> & NativeType<I>> RandomAccessibleInterval<UnsignedByteType> getAsUnsignedByteType() throws IOException {
+		private <I extends IntegerType<I> & NativeType<I>> RandomAccessibleInterval<UnsignedByteType> getAsUnsignedByteType(N5Reader reader) throws IOException {
 
-			final RandomAccessibleInterval<I> rai = N5Utils.open(container.get(), dataset);
+			final RandomAccessibleInterval<I> rai = N5Helpers.openBounded(reader, dataset);
 			return Converters.convert(rai, (s, t) -> t.setInteger(s.getIntegerLong()), new UnsignedByteType());
 		}
 	}
@@ -588,7 +611,7 @@ public class AverageAffinities {
 			final DataType dtype = reader.getDatasetAttributes(dataset).getDataType();
 			switch (dtype) {
 			case FLOAT32:
-				return N5Utils.open(reader, dataset);
+				return getCachedSource(reader);
 			default:
 				return readAndConvert(reader);
 			}
@@ -596,8 +619,20 @@ public class AverageAffinities {
 
 		private <T extends NativeType<T> & RealType<T>> RandomAccessibleInterval<FloatType> readAndConvert(final N5Reader reader) throws IOException {
 
-			final RandomAccessibleInterval<T> ds = N5Utils.open(reader, dataset);
-			return Converters.convert(ds, new RealFloatConverter<>(), new FloatType());
+			final RandomAccessibleInterval<T> source = getCachedSource(reader);
+			return Converters.convert(source, new RealFloatConverter<>(), new FloatType());
+		}
+
+		private <T extends NativeType<T> & RealType<T>> RandomAccessibleInterval<T> getCachedSource(N5Reader reader) {
+
+			final String imgCacheKey = new URIBuilder(reader.getURI())
+					.setParameters(
+							new BasicNameValuePair("type", "reader"),
+							new BasicNameValuePair("call", "glia-mask-supplier"),
+							new BasicNameValuePair("step", "get-image")
+					).toString();
+
+			return Singleton.get(imgCacheKey, () -> N5Helpers.openBounded(reader, dataset));
 		}
 	}
 
