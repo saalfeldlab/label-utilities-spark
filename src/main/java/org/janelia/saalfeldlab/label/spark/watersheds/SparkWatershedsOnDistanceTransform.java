@@ -26,6 +26,7 @@ import net.imglib2.algorithm.localextrema.LocalExtrema;
 import net.imglib2.algorithm.morphology.distance.DistanceTransform;
 import net.imglib2.algorithm.neighborhood.DiamondShape;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.algorithm.util.Singleton;
 import net.imglib2.algorithm.util.unionfind.LongHashMapUnionFind;
 import net.imglib2.algorithm.util.unionfind.UnionFind;
 import net.imglib2.converter.Converters;
@@ -48,19 +49,21 @@ import net.imglib2.util.Intervals;
 import net.imglib2.util.Util;
 import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
+import org.apache.http.client.utils.URIBuilder;
+import org.apache.http.message.BasicNameValuePair;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.PairFunction;
+import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.label.spark.Version;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
-import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
+import org.janelia.saalfeldlab.n5.universe.N5Factory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
@@ -69,8 +72,6 @@ import scala.Tuple2;
 import java.io.IOException;
 import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -403,9 +404,10 @@ public class SparkWatershedsOnDistanceTransform {
 			LOG.debug("Relabeled {} blocks", numBlocks);
 			final long maxId = startIndex;
 			LOG.info("Found max id {}", maxId);
-			n5out.get().setAttribute(watershedSeeds, "maxId", maxId);
-			n5out.get().setAttribute(merged, "maxId", maxId);
-			n5out.get().setAttribute(seededWatersheds, "maxId", maxId);
+			final N5Writer writer = n5out.get();
+			writer.setAttribute(watershedSeeds, "maxId", maxId);
+			writer.setAttribute(merged, "maxId", maxId);
+			writer.setAttribute(seededWatersheds, "maxId", maxId);
 
 			//			final IntArrayUnionFind uf = findOverlappingLabelsArgMaxNoHalo(sc, n5out, merged, new IntArrayUnionFind((int) (maxId + 2)), outputDims, blockSize, blocksPerTask, 0);
 			final LongHashMapUnionFind uf = findOverlappingLabelsThresholdMedianEdgeAffinities(
@@ -495,9 +497,22 @@ public class SparkWatershedsOnDistanceTransform {
 			final Interval interval,
 			final BiConsumer<T, T> idMapping) throws IOException {
 
-		final DatasetAttributes attributes = n5.getDatasetAttributes(source);
+		final String writerCacheKey = new URIBuilder(n5.getURI()).setParameters(
+				new BasicNameValuePair("type", "writer"),
+				new BasicNameValuePair("call", "spark-watersheds-distance-transform-relabel")
+		).toString();
+		final var writer = Singleton.get(writerCacheKey, () -> n5);
+
+		final DatasetAttributes attributes = writer.getDatasetAttributes(source);
 		final CellGrid grid = new CellGrid(attributes.getDimensions(), attributes.getBlockSize());
-		final RandomAccessibleInterval<T> data = Views.interval(N5Utils.<T>open(n5, source), interval);
+
+		final String labelsCacheKey = new URIBuilder(writer.getURI()).setParameters(
+				new BasicNameValuePair("call", "spark-watersheds-distance-transform-relabel"),
+				new BasicNameValuePair("dataset", source)
+		).toString();
+		final var img = Singleton.get(labelsCacheKey, () -> N5Utils.<T>open(writer, source));
+
+		final RandomAccessibleInterval<T> data = Views.interval(img, interval);
 		final RandomAccessibleInterval<T> copy = new ArrayImgFactory<>(Util.getTypeFromInterval(data).createVariable()).create(data);
 		LOG.debug("Input size {} -- output size {}", Intervals.dimensionsAsLongArray(data), Intervals.dimensionsAsLongArray(copy));
 		long maxId = Long.MIN_VALUE;
@@ -512,7 +527,7 @@ public class SparkWatershedsOnDistanceTransform {
 		}
 		final long[] blockPos = Intervals.minAsLongArray(interval);
 		grid.getCellPosition(blockPos, blockPos);
-		N5Utils.saveBlock(copy, n5, target, attributes, blockPos);
+		N5Utils.saveBlock(copy, writer, target, attributes, blockPos);
 	}
 
 	private static void relabel(
@@ -584,13 +599,12 @@ public class SparkWatershedsOnDistanceTransform {
 
 		@Override
 		public N5Writer get() {
-
-			return Files.isDirectory(Paths.get(container))
-					? new N5FSWriter(container, createaBuilder())
-					: new N5HDF5Writer(container);
+			final N5Factory factory = N5Helpers.defaultFactory();
+			factory.gsonBuilder(createBuilder());
+			return factory.openWriter(container);
 		}
 
-		private GsonBuilder createaBuilder() {
+		private GsonBuilder createBuilder() {
 
 			return serializeSpecialFloatingPointValues(withPrettyPrinting(disableHtmlEscaping(new GsonBuilder())));
 		}
@@ -724,9 +738,22 @@ public class SparkWatershedsOnDistanceTransform {
 				.mapToPair(minMax -> {
 					final long[] thisBlockMax = minMax._2();
 
-					final RandomAccessibleInterval<UnsignedLongType> labels = N5Utils.open(labelContainer.get(), labelDataset);
+					final N5Reader labelsReader = labelContainer.get();
+					final String labelsCacheKey = new URIBuilder(labelsReader.getURI()).setParameters(
+							new BasicNameValuePair("call", "spark-watersheds-distance-transform-find-overlapping-labels"),
+							new BasicNameValuePair("container", "labels"),
+							new BasicNameValuePair("dataset", labelDataset)
+					).toString();
+					final RandomAccessibleInterval<UnsignedLongType> labels = Singleton.get(labelsCacheKey, () -> N5Helpers.openBounded(labelsReader, labelDataset));
 					final RandomAccessibleInterval<UnsignedLongType> thisBlockLabels = Views.interval(labels, minMax._1(), thisBlockMax);
-					final RandomAccessibleInterval<FloatType> affinities = N5Utils.open(affinitiesContainer.get(), affinitiesDataset);
+
+					final N5Reader affinitiesReader = affinitiesContainer.get();
+					final String affinitiesCacheKey = new URIBuilder(affinitiesReader.getURI()).setParameters(
+							new BasicNameValuePair("call", "spark-watersheds-distance-transform-find-overlapping-labels"),
+							new BasicNameValuePair("container", "affinities"),
+							new BasicNameValuePair("dataset", affinitiesDataset)
+					).toString();
+					final RandomAccessibleInterval<FloatType> affinities = Singleton.get(affinitiesCacheKey, () -> N5Helpers.openBounded(affinitiesContainer.get(), affinitiesDataset));
 
 					final TLongSet ignoreTheseSet = new TLongHashSet(ignoreThese);
 
@@ -880,7 +907,15 @@ public class SparkWatershedsOnDistanceTransform {
 				.mapToPair(minMax -> {
 					final long[] thisBlockMax = minMax._2();
 
-					final RandomAccessibleInterval<UnsignedLongType> labels = N5Utils.open(n5.get(), labelDataset);
+						final N5Reader labelsReader = n5.get();
+					final String labelsCacheKey = new URIBuilder(labelsReader.getURI()).setParameters(
+							new BasicNameValuePair("call", "spark-watersheds-distance-transform-find-overlapping-labels-no-halo"),
+							new BasicNameValuePair("container", "labels"),
+							new BasicNameValuePair("dataset", labelDataset)
+					).toString();
+
+
+					final RandomAccessibleInterval<UnsignedLongType> labels = Singleton.get(labelsCacheKey, () -> N5Helpers.openBounded(labelsReader, labelDataset));
 					final RandomAccessibleInterval<UnsignedLongType> thisBlock = Views.interval(labels, minMax._1(), thisBlockMax);
 
 					final TLongSet ignoreTheseSet = new TLongHashSet(ignoreThese);
@@ -1010,7 +1045,12 @@ public class SparkWatershedsOnDistanceTransform {
 		@Override
 		public Tuple2<Interval, Tuple2<RandomAccessibleInterval<FloatType>, RandomAccessibleInterval<DoubleType>>> call(final Interval interval) throws Exception {
 
-			final RandomAccessibleInterval<FloatType> affsImg = N5Utils.open(n5in.get(), affinities);
+			final N5Reader n5Local = n5in.get();
+			final String cacheKey = new URIBuilder(n5Local.getURI()).setParameters(
+					new BasicNameValuePair("affinities", affinities),
+					new BasicNameValuePair("call", "spark-watersheds-distance-transform")
+			).toString();
+			final RandomAccessibleInterval<FloatType> affsImg = Singleton.get(cacheKey, () -> N5Helpers.openBounded(n5Local, affinities));
 			final RandomAccessible<FloatType> affs = Views.extendValue(affsImg, new FloatType(Float.NaN));
 			final long[] min = Intervals.minAsLongArray(interval);
 

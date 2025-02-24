@@ -7,6 +7,7 @@ import net.imglib2.Interval;
 import net.imglib2.RandomAccessible;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.algorithm.util.Singleton;
 import net.imglib2.converter.Converters;
 import net.imglib2.img.array.ArrayImg;
 import net.imglib2.img.array.ArrayImgs;
@@ -18,12 +19,14 @@ import net.imglib2.util.ConstantUtils;
 import net.imglib2.util.Intervals;
 import net.imglib2.view.IntervalView;
 import net.imglib2.view.Views;
+import org.apache.http.client.utils.URIBuilder;
+import org.apache.http.message.BasicNameValuePair;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
-import org.janelia.saalfeldlab.n5.N5FSReader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.slf4j.Logger;
@@ -34,6 +37,7 @@ import scala.Tuple2;
 import java.io.IOException;
 import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
+import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -133,7 +137,7 @@ public class MakePredictionMask {
 				throw new Exception("One of input dataset size or input dataset must be specified!");
 
 			if (inputDataset != null)
-				inputDatasetSize = new N5FSReader(inputContainer).getDatasetAttributes(inputDataset).getDimensions();
+				inputDatasetSize = N5Helpers.n5Reader(inputContainer).getDatasetAttributes(inputDataset).getDimensions();
 
 			for (int d = 0; d < inputOffset.length; ++d)
 				if (inputOffset[d] / inputResolution[d] != (int)(inputOffset[d] / inputResolution[d]))
@@ -313,9 +317,18 @@ public class MakePredictionMask {
 						//						for (long z = Math.max(min[2], 344); z < Math.min(max[2], 357); ++z)
 						//							Views.hyperSlice(Views.translate(outputMask, min), 2, z).forEach(UnsignedByteType::setZero);
 
+						final N5Writer outLocal = n5out.get();
+						final URI writerURI = outLocal.getURI();
+						final String writerCacheKey = new URIBuilder(writerURI).setParameters(
+								new BasicNameValuePair("type", "writer"),
+								new BasicNameValuePair("call", "make-prediction-mask")
+								).toString();
+
+						final N5Writer writer = Singleton.get(writerCacheKey, () -> outLocal);
+
 						N5Utils.saveBlock(
 								outputMask,
-								n5out.get(),
+								writer,
 								maskDataset,
 								attributes,
 								block._2());
@@ -405,7 +418,13 @@ public class MakePredictionMask {
 		@Override
 		public RandomAccessible<UnsignedByteType> get() {
 
-			final RandomAccessibleInterval<IntegerType<?>> img = (RandomAccessibleInterval)N5Utils.open(n5.get(), dataset);
+			final String maskCacheKey = new URIBuilder(n5.get().getURI())
+					.setParameters(
+							new BasicNameValuePair("call", "mask-provider-from-n5"),
+							new BasicNameValuePair("dataset", dataset)
+					).toString();
+
+			final RandomAccessibleInterval<IntegerType<?>> img = Singleton.get(maskCacheKey, () -> (RandomAccessibleInterval)N5Helpers.openBounded(n5.get(), dataset));
 			final RandomAccessibleInterval<UnsignedByteType> convertedImg = Converters.convert(img, (s, t) -> t.setInteger(s.getIntegerLong()), new UnsignedByteType());
 			return Views.extendValue(convertedImg, new UnsignedByteType(0));
 		}

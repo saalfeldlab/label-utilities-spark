@@ -1,8 +1,19 @@
 package org.janelia.saalfeldlab.label.spark;
 
+import net.imglib2.cache.img.CachedCellImg;
+import net.imglib2.cache.ref.BoundedSoftRefLoaderCache;
+import net.imglib2.img.basictypeaccess.AccessFlags;
+import net.imglib2.img.cell.Cell;
+import net.imglib2.img.cell.CellGrid;
+import net.imglib2.type.NativeType;
+import net.imglib2.type.label.Label;
+import net.imglib2.type.label.VolatileLabelMultisetArray;
 import org.janelia.saalfeldlab.n5.N5Exception;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
+import org.janelia.saalfeldlab.n5.imglib2.N5LabelMultisetCacheLoader;
+import org.janelia.saalfeldlab.n5.imglib2.N5LabelMultisets;
+import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.janelia.saalfeldlab.n5.universe.N5Factory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,9 +22,16 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.Arrays;
 import java.util.Optional;
+import java.util.function.BiFunction;
 import java.util.regex.Pattern;
 
 public class N5Helpers {
+
+	public static N5Factory defaultFactory() {
+
+		final N5Factory factory = new N5Factory();
+		return factory;
+	}
 
 	public static final String LABEL_MULTISETTYPE_KEY = "isLabelMultiset";
 
@@ -25,17 +43,44 @@ public class N5Helpers {
 
 	private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-	public static N5Reader n5Reader(final String base, final int... defaultCellDimensions) throws IOException {
+	static final N5Factory factory = defaultFactory();
 
-		final var factory = new N5Factory();
-		factory.hdf5DefaultBlockSize(defaultCellDimensions);
+	private static final int[] cellDimensions = {64, 64, 64, 1, 1};
+
+	public static N5Reader n5Reader(final String base, final int... defaultCellDimensions) {
+
+		if (defaultCellDimensions == null || defaultCellDimensions.length == 0)
+			factory.hdf5DefaultBlockSize(cellDimensions);
+		else
+			factory.hdf5DefaultBlockSize(defaultCellDimensions);
 		return factory.openReader(base);
+
 	}
 
-	public static N5Writer n5Writer(final String base, final int... defaultCellDimensions) throws IOException {
+	public static <T extends NativeType<T>> CachedCellImg<T, ?> openBounded(final N5Reader n5, final String dataset) {
 
-		final var factory = new N5Factory();
-		factory.hdf5DefaultBlockSize(defaultCellDimensions);
+		return openBounded(n5, dataset, 200);
+	}
+
+	public static <T extends NativeType<T>> CachedCellImg<T, ?> openBounded(final N5Reader n5, final String dataset, int maxSoftRefs) {
+
+		if (N5LabelMultisets.isLabelMultisetType(n5, dataset)) {
+			final BoundedSoftRefLoaderCache<Long, Cell<VolatileLabelMultisetArray>> boundedCache = new BoundedSoftRefLoaderCache<>(maxSoftRefs);
+			final BiFunction<CellGrid, long[], byte[]> nullReplacement = N5LabelMultisetCacheLoader.constantNullReplacement(Label.BACKGROUND);
+			return (CachedCellImg<T, ?>)N5LabelMultisets.openLabelMultiset(n5, dataset, nullReplacement, boundedCache);
+		}
+		return N5Utils.open(n5, dataset, img -> {
+		}, dataType -> new BoundedSoftRefLoaderCache<>(maxSoftRefs), AccessFlags.setOf());
+
+	}
+
+	public static N5Writer n5Writer(final String base, final int... defaultCellDimensions) {
+
+		if (defaultCellDimensions == null || defaultCellDimensions.length == 0)
+			factory.hdf5DefaultBlockSize(cellDimensions);
+		else
+			factory.hdf5DefaultBlockSize(defaultCellDimensions);
+
 		return factory.openWriter(base);
 	}
 

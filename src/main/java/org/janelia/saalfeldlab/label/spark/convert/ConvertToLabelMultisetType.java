@@ -2,10 +2,13 @@ package org.janelia.saalfeldlab.label.spark.convert;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.pivovarit.function.ThrowingSupplier;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.algorithm.util.Singleton;
+import net.imglib2.cache.img.CachedCellImg;
 import net.imglib2.converter.Converters;
 import net.imglib2.type.NativeType;
 import net.imglib2.type.label.FromIntegerTypeConverter;
@@ -14,6 +17,8 @@ import net.imglib2.type.numeric.IntegerType;
 import net.imglib2.util.Intervals;
 import net.imglib2.view.Views;
 import org.apache.commons.lang3.time.DurationFormatUtils;
+import org.apache.http.client.utils.URIBuilder;
+import org.apache.http.message.BasicNameValuePair;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
@@ -27,6 +32,8 @@ import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5LabelMultisets;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
+import org.janelia.saalfeldlab.n5.universe.N5Factory;
+import org.janelia.saalfeldlab.n5.universe.StorageFormat;
 import org.janelia.saalfeldlab.n5.zarr.ZarrKeyValueReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +44,8 @@ import scala.Tuple2;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -161,10 +170,21 @@ public class ConvertToLabelMultisetType {
 			final Compression compression,
 			final boolean reverse) throws IOException {
 
+		final ThrowingSupplier<CachedCellImg<I, ?>, URISyntaxException> getCachedImg = () -> {
+			final URI inputGroupUri = StorageFormat.parseUri(inputGroup).getB();
+			final String inputImgCacheKey = new URIBuilder(inputGroupUri)
+					.setParameters(
+							new BasicNameValuePair("call", "convert-to-label-multiset-type"),
+							new BasicNameValuePair("dataset", inputDataset)
+					).toString();
+
+			return Singleton.get(inputImgCacheKey, () -> N5Helpers.openBounded(N5Helpers.n5Reader(inputGroup, blockSize), inputDataset));
+		};
+
 		final N5Reader reader = N5Helpers.n5Reader(inputGroup, blockSize);
 		final DatasetAttributes inputDataAttrs = reader.getDatasetAttributes(inputDataset);
 		final int[] inputBlockSize = inputDataAttrs.getBlockSize();
-		final RandomAccessibleInterval<I> img = N5Utils.open(reader, inputDataset);
+		final RandomAccessibleInterval<I> img = getCachedImg.uncheck().get();
 		final Map<String, Class<?>> attributeNames;
 		if (reader instanceof ZarrKeyValueReader) {
 			attributeNames = Optional.of(reader)
@@ -188,7 +208,14 @@ public class ConvertToLabelMultisetType {
 		final long[] dimensions = new long[nDim];
 		img.dimensions(dimensions);
 
-		final N5Writer writer = N5Helpers.n5Writer(outputGroupName, blockSize);
+		final URI outputGroupUri = N5Factory.createReader(outputGroupName).getURI();
+		final String writerCacheKey = new URIBuilder(outputGroupUri).setParameters(
+				new BasicNameValuePair("type", "writer"),
+				new BasicNameValuePair("call", "convert-to-label-multiset-type")
+		).toString();
+
+		final N5Writer writer = Singleton.get(writerCacheKey, () -> N5Helpers.n5Writer(outputGroupName, blockSize));
+
 		final boolean outputDatasetExisted = writer.datasetExists(outputDatasetName);
 		if (outputDatasetExisted) {
 			final int[] existingBlockSize = writer.getDatasetAttributes(outputDatasetName).getBlockSize();
@@ -219,10 +246,14 @@ public class ConvertToLabelMultisetType {
 				.map(intervalMinMax -> {
 					final Interval interval = new FinalInterval(intervalMinMax._1(), intervalMinMax._2());
 
-					@SuppressWarnings("unchecked") final RandomAccessibleInterval<I> blockImg = Views.interval(
-							(RandomAccessibleInterval<I>)N5Utils.open(N5Helpers.n5Reader(inputGroup, blockSize), inputDataset),
-							interval
-					);
+					final URI uri = StorageFormat.parseUri(inputGroup).getB();
+					final String imgCacheKey = new URIBuilder(uri)
+							.setParameters(
+									new BasicNameValuePair("call", "convert-to-label-multiset-max-id"),
+									new BasicNameValuePair("dataset", inputDataset)
+							).toString();
+					final CachedCellImg<I, ?> source = Singleton.get(imgCacheKey, () -> N5Helpers.openBounded(N5Helpers.n5Reader(inputGroup, blockSize), inputDataset));
+					final RandomAccessibleInterval<I> blockImg = Views.interval(source, interval);
 
 					final FromIntegerTypeConverter<I> converter = new FromIntegerTypeConverter<>();
 					final LabelMultisetType type = FromIntegerTypeConverter.getAppropriateType();
@@ -233,7 +264,7 @@ public class ConvertToLabelMultisetType {
 					}
 					final RandomAccessibleInterval<LabelMultisetType> converted = Converters.convert(blockImg, converter, type);
 
-					final N5Writer localWriter = N5Helpers.n5Writer(outputGroupName, blockSize);
+					final N5Writer localWriter = Singleton.get(writerCacheKey, () -> N5Helpers.n5Writer(outputGroupName, blockSize));
 
 					if (outputDatasetExisted) {
 						// Empty blocks will not be written out. Delete blocks to avoid remnant blocks if overwriting.
@@ -246,6 +277,7 @@ public class ConvertToLabelMultisetType {
 				})
 				.max(Comparator.naturalOrder());
 
+		Singleton.clear();
 		writer.setAttribute(outputDatasetName, MAX_ID_KEY, maxId);
 	}
 }

@@ -5,6 +5,7 @@ import net.imglib2.util.Intervals;
 import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.label.spark.exception.InputSameAsOutput;
 import org.janelia.saalfeldlab.label.spark.exception.InvalidDataType;
 import org.janelia.saalfeldlab.label.spark.exception.InvalidDataset;
@@ -12,12 +13,9 @@ import org.janelia.saalfeldlab.label.spark.exception.InvalidN5Container;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
-import org.janelia.saalfeldlab.n5.N5FSReader;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
-import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Reader;
-import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
+import org.janelia.saalfeldlab.n5.universe.N5Factory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
@@ -148,7 +146,7 @@ public class ExtractUniqueLabelsPerBlock {
 								dims,
 								blockSize,
 								isMultisetType))
-				.reduce(Math::max);
+				.treeReduce(Math::max);
 	}
 
 	public static void run(final String... args) throws IOException {
@@ -159,16 +157,20 @@ public class ExtractUniqueLabelsPerBlock {
 
 	}
 
-	public static N5Reader n5Reader(final String base, final int... defaultCellDimensions) throws IOException {
+	public static N5Reader n5Reader(final String base, final int... defaultCellDimensions) {
 
-		return isHDF(base) ? new N5HDF5Reader(base, defaultCellDimensions) : new N5FSReader(base);
+		final N5Factory factory = N5Helpers.defaultFactory();
+		factory.hdf5DefaultBlockSize(defaultCellDimensions);
+		return factory.openReader(base);
 	}
 
-	public static N5Writer n5Writer(final String base, final int... defaultCellDimensions) throws IOException {
-
-		return isHDF(base) ? new N5HDF5Writer(base, defaultCellDimensions) : new N5FSWriter(base);
+	public static N5Writer n5Writer(final String base, final int... defaultCellDimensions) {
+		final N5Factory factory = N5Helpers.defaultFactory();
+		factory.hdf5DefaultBlockSize(defaultCellDimensions);
+		return factory.openWriter(base);
 	}
 
+	@Deprecated
 	public static boolean isHDF(final String base) {
 
 		LOG.debug("Checking {} for HDF", base);

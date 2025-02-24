@@ -4,8 +4,11 @@ import com.google.gson.GsonBuilder;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
 import net.imglib2.algorithm.util.Grids;
+import net.imglib2.algorithm.util.Singleton;
 import net.imglib2.util.Intervals;
 import org.apache.commons.lang3.time.DurationFormatUtils;
+import org.apache.http.client.utils.URIBuilder;
+import org.apache.http.message.BasicNameValuePair;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
@@ -18,8 +21,10 @@ import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
+import org.janelia.saalfeldlab.n5.N5Writer;
+import org.janelia.saalfeldlab.n5.universe.N5Factory;
+import org.janelia.saalfeldlab.n5.universe.StorageFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sparkproject.guava.io.Files;
@@ -110,11 +115,16 @@ public class LabelToBlockMapping {
 			final int stepSize) throws IOException {
 
 		final N5Reader reader = N5Helpers.n5Reader(inputN5, N5Helpers.DEFAULT_BLOCK_SIZE);
-		final N5FSWriter writer = new N5FSWriter(outputN5, new GsonBuilder().registerTypeHierarchyAdapter(LabelBlockLookup.class, LabelBlockLookupAdapter.getJsonAdapter()));
-		writer.createGroup(relativeLookupGroup == null ? enclosingGroup : enclosingGroup + "/" + relativeLookupGroup);
+		final N5Factory factory = N5Helpers.defaultFactory();
+		factory.gsonBuilder(new GsonBuilder().registerTypeHierarchyAdapter(LabelBlockLookup.class, LabelBlockLookupAdapter.getJsonAdapter()));
+		final N5Writer writer = factory.openWriter(outputN5);
+
+		final String groupPath = relativeLookupGroup == null ? enclosingGroup : enclosingGroup + "/" + relativeLookupGroup;
 		final String pattern = relativeLookupGroup == null ? "s%d" : relativeLookupGroup + "/s%d";
 		final LabelBlockLookupN5Supplier lookupSupplier = new LabelBlockLookupN5Supplier(outputN5, enclosingGroup, pattern);
 		writer.setAttribute(enclosingGroup, "labelBlockLookup", lookupSupplier.get());
+		if (!writer.exists(groupPath))
+			writer.createGroup(groupPath);
 
 		if (N5Helpers.isMultiScale(reader, inputDataset)) {
 			final String[] sortedScaleDirs = N5Helpers.listAndSortScaleDatasets(reader, inputDataset);
@@ -181,7 +191,11 @@ public class LabelToBlockMapping {
 				.parallelize(intervals)
 				.mapToPair(minMax -> {
 					final long[] blockPos = N5Helpers.blockPos(minMax._1(), blockSize);
-					final N5Reader n5reader = N5Helpers.n5Reader(inputN5, N5Helpers.DEFAULT_BLOCK_SIZE);
+					final String readerCacheKey = new URIBuilder(StorageFormat.parseUri(inputN5).getB()).setParameters(
+							new BasicNameValuePair("type", "reader"),
+							new BasicNameValuePair("call", "label-block-mapping-create-mapping-n5")
+					).toString();
+					final N5Reader n5reader = Singleton.get(readerCacheKey, () -> N5Helpers.n5Reader(inputN5, N5Helpers.DEFAULT_BLOCK_SIZE));
 					final LongArrayDataBlock block = (LongArrayDataBlock)n5reader.readBlock(inputDataset, new DatasetAttributes(dims, blockSize, DataType.UINT64, new GzipCompression()), blockPos);
 					return new Tuple2<>(minMax, block.getData());
 				})
@@ -243,7 +257,11 @@ public class LabelToBlockMapping {
 				.parallelize(intervals)
 				.mapToPair(minMax -> {
 					final long[] blockPos = N5Helpers.blockPos(minMax._1(), blockSize);
-					final N5Reader n5reader = N5Helpers.n5Reader(inputN5, N5Helpers.DEFAULT_BLOCK_SIZE);
+					final String readerCacheKey = new URIBuilder(StorageFormat.parseUri(inputN5).getB()).setParameters(
+							new BasicNameValuePair("type", "reader"),
+							new BasicNameValuePair("call", "label-block-mapping-create-mapping")
+					).toString();
+					final N5Reader n5reader = Singleton.get(readerCacheKey, () -> N5Helpers.n5Reader(inputN5, N5Helpers.DEFAULT_BLOCK_SIZE));
 					final LongArrayDataBlock block = (LongArrayDataBlock)n5reader.readBlock(inputDataset, new DatasetAttributes(dims, blockSize, DataType.UINT64, new GzipCompression()), blockPos);
 					return new Tuple2<>(minMax, block.getData());
 				})
@@ -306,7 +324,7 @@ public class LabelToBlockMapping {
 		public LabelBlockLookupFromN5Relative get() {
 
 			final LabelBlockLookupFromN5Relative lookup = new LabelBlockLookupFromN5Relative(pattern);
-			lookup.setRelativeTo(new N5FSWriter(root), group);
+			lookup.setRelativeTo(N5Helpers.n5Writer(root), group);
 			return lookup;
 		}
 	}

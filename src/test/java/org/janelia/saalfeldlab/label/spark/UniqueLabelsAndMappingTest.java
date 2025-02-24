@@ -20,9 +20,8 @@ import org.janelia.saalfeldlab.label.spark.uniquelabels.LabelToBlockMapping;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
-import org.janelia.saalfeldlab.n5.N5FSReader;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Reader;
+import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.RawCompression;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.junit.After;
@@ -93,14 +92,14 @@ public class UniqueLabelsAndMappingTest {
 
 	public UniqueLabelsAndMappingTest() throws IOException {
 
-		this.tmpDir = Files.createTempDirectory("unique-labels-test").toAbsolutePath().toString();
+		this.tmpDir = Files.createTempDirectory("unique-labels-test").resolve("container.n5").toAbsolutePath().toString();
 		this.labelToBlocksMappingDirectory = Paths.get(tmpDir, "label-to-block-mapping").toAbsolutePath().toString();
 	}
 
 	@Before
 	public void setUp() throws IOException {
 
-		final N5FSWriter n5 = new N5FSWriter(this.tmpDir);
+		final N5Writer n5 = N5Helpers.n5Writer(this.tmpDir);
 		n5.createDataset(labelDataset, new DatasetAttributes(dims, blockSize, DataType.UINT64, new RawCompression()));
 		N5Utils.save(labelImg, n5, labelDataset, blockSize, new RawCompression());
 	}
@@ -121,7 +120,7 @@ public class UniqueLabelsAndMappingTest {
 			ExtractUniqueLabelsPerBlock.extractUniqueLabels(sc, tmpDir, tmpDir, labelDataset, uniqueLabelDataset);
 			LabelToBlockMapping.createMapping(sc, tmpDir, uniqueLabelDataset, labelToBlocksMappingDirectory);
 		}
-		final N5Reader n5 = new N5FSReader(tmpDir);
+		final N5Reader n5 = N5Helpers.n5Reader(tmpDir);
 		final DatasetAttributes uniqueLabelAttributes = n5.getDatasetAttributes(uniqueLabelDataset);
 
 		Assert.assertArrayEquals(dims, uniqueLabelAttributes.getDimensions());

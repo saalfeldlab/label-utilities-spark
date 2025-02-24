@@ -1,13 +1,11 @@
 package org.janelia.saalfeldlab.label.spark.affinities;
 
 import com.google.gson.GsonBuilder;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
+import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.N5Writer;
-import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
+import org.janelia.saalfeldlab.n5.universe.N5Factory;
 
 import java.io.Serializable;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -31,12 +29,12 @@ class N5WriterSupplier implements Supplier<N5Writer>, Serializable {
 	@Override
 	public N5Writer get() {
 
-		return Files.isDirectory(Paths.get(container))
-				? new N5FSWriter(container, createaBuilder())
-				: new N5HDF5Writer(container);
+		final N5Factory factory = N5Helpers.defaultFactory();
+		factory.gsonBuilder(createBuilder());
+		return factory.openWriter(container);
 	}
 
-	private GsonBuilder createaBuilder() {
+	private GsonBuilder createBuilder() {
 
 		return serializeSpecialFloatingPointValues(withPrettyPrinting(disableHtmlEscaping(new GsonBuilder())));
 	}
