@@ -585,7 +585,7 @@ public class SparkWatersheds {
 			final LongUnaryOperator idMapping) throws IOException {
 
 		final DatasetAttributes attributes = n5.getDatasetAttributes(dataset);
-		final LongArrayDataBlock block = ((LongArrayDataBlock)n5.readBlock(dataset, attributes, blockPos));
+		final DataBlock<long[]> block = n5.readBlock(dataset, attributes, blockPos);
 		final long[] data = block.getData();
 		for (int i = 0; i < data.length; ++i) {
 			data[i] = idMapping.applyAsLong(data[i]);

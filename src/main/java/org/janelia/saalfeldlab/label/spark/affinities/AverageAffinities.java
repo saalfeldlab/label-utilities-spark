@@ -389,7 +389,7 @@ public class AverageAffinities {
 							success[i] = false;
 							try {
 								n5out.writeBlock(averaged, attributes, block);
-								final DataBlock<float[]> reloaded = (DataBlock<float[]>)n5out.readBlock(averaged, attributes, saveThisBlockAt);
+								final DataBlock<float[]> reloaded = n5out.readBlock(averaged, attributes, saveThisBlockAt);
 								success[i] = Arrays.equals(block.getData(), reloaded.getData());
 							} catch (Exception e) {
 								success[i] = false;

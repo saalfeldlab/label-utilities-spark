@@ -56,12 +56,7 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.PairFunction;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.label.spark.Version;
-import org.janelia.saalfeldlab.n5.DataType;
-import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
-import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
-import org.janelia.saalfeldlab.n5.N5Reader;
-import org.janelia.saalfeldlab.n5.N5Writer;
+import org.janelia.saalfeldlab.n5.*;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.janelia.saalfeldlab.n5.universe.N5Factory;
 import org.slf4j.Logger;
@@ -578,7 +573,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunction {
 			final LongUnaryOperator idMapping) throws IOException {
 
 		final DatasetAttributes attributes = n5.getDatasetAttributes(dataset);
-		final LongArrayDataBlock block = ((LongArrayDataBlock)n5.readBlock(dataset, attributes, blockPos));
+		final DataBlock<long[]> block = n5.readBlock(dataset, attributes, blockPos);
 		final long[] data = block.getData();
 		for (int i = 0; i < data.length; ++i) {
 			data[i] = idMapping.applyAsLong(data[i]);

@@ -9,10 +9,7 @@ import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.spark.api.java.function.VoidFunction;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
-import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
-import org.janelia.saalfeldlab.n5.N5Reader;
-import org.janelia.saalfeldlab.n5.N5Writer;
+import org.janelia.saalfeldlab.n5.*;
 import org.janelia.saalfeldlab.n5.universe.StorageFormat;
 
 import java.net.URI;
@@ -82,7 +79,7 @@ public class LabelListDownsampleFunction implements VoidFunction<Interval> {
 		final int[] bs = attr.getBlockSize();
 		for (final long[] cellPos : cellPositions) {
 			Arrays.setAll(cellPos, d -> cellPos[d] / bs[d]);
-			final LongArrayDataBlock source = (LongArrayDataBlock)reader.readBlock(inputDatasetName, attr, cellPos);
+			final DataBlock<long[]> source = reader.readBlock(inputDatasetName, attr, cellPos);
 			containedLabels.addAll(source.getData());
 		}
 

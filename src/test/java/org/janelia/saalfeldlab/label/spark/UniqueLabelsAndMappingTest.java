@@ -17,12 +17,7 @@ import org.janelia.saalfeldlab.label.spark.exception.InvalidDataset;
 import org.janelia.saalfeldlab.label.spark.exception.InvalidN5Container;
 import org.janelia.saalfeldlab.label.spark.uniquelabels.ExtractUniqueLabelsPerBlock;
 import org.janelia.saalfeldlab.label.spark.uniquelabels.LabelToBlockMapping;
-import org.janelia.saalfeldlab.n5.DataType;
-import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
-import org.janelia.saalfeldlab.n5.N5Reader;
-import org.janelia.saalfeldlab.n5.N5Writer;
-import org.janelia.saalfeldlab.n5.RawCompression;
+import org.janelia.saalfeldlab.n5.*;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.junit.After;
 import org.junit.Assert;
@@ -131,7 +126,7 @@ public class UniqueLabelsAndMappingTest {
 			final long[] blockPosition = block.clone();
 			Arrays.setAll(blockPosition, d -> blockPosition[d] / blockSize[d]);
 
-			final LongArrayDataBlock blockData = ((LongArrayDataBlock)n5.readBlock(uniqueLabelDataset, uniqueLabelAttributes, blockPosition));
+			final DataBlock<long[]> blockData = n5.readBlock(uniqueLabelDataset, uniqueLabelAttributes, blockPosition);
 			final long[] sortedContents = blockData.getData().clone();
 			Arrays.sort(sortedContents);
 

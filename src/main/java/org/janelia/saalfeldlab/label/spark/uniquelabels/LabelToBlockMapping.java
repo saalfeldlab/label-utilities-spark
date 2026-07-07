@@ -17,12 +17,7 @@ import org.janelia.saalfeldlab.label.spark.exception.InvalidN5Container;
 import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookup;
 import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookupAdapter;
 import org.janelia.saalfeldlab.labels.blocks.n5.LabelBlockLookupFromN5Relative;
-import org.janelia.saalfeldlab.n5.DataType;
-import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
-import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
-import org.janelia.saalfeldlab.n5.N5Reader;
-import org.janelia.saalfeldlab.n5.N5Writer;
+import org.janelia.saalfeldlab.n5.*;
 import org.janelia.saalfeldlab.n5.universe.N5Factory;
 import org.janelia.saalfeldlab.n5.universe.StorageFormat;
 import org.slf4j.Logger;
@@ -196,7 +191,7 @@ public class LabelToBlockMapping {
 							new BasicNameValuePair("call", "label-block-mapping-create-mapping-n5")
 					).toString();
 					final N5Reader n5reader = Singleton.get(readerCacheKey, () -> N5Helpers.n5Reader(inputN5, N5Helpers.DEFAULT_BLOCK_SIZE));
-					final LongArrayDataBlock block = (LongArrayDataBlock)n5reader.readBlock(inputDataset, new DatasetAttributes(dims, blockSize, DataType.UINT64, new GzipCompression()), blockPos);
+					final DataBlock<long[]> block = n5reader.readBlock(inputDataset, new DatasetAttributes(dims, blockSize, DataType.UINT64, new GzipCompression()), blockPos);
 					return new Tuple2<>(minMax, block.getData());
 				})
 				.flatMapToPair(input -> Arrays
@@ -262,7 +257,7 @@ public class LabelToBlockMapping {
 							new BasicNameValuePair("call", "label-block-mapping-create-mapping")
 					).toString();
 					final N5Reader n5reader = Singleton.get(readerCacheKey, () -> N5Helpers.n5Reader(inputN5, N5Helpers.DEFAULT_BLOCK_SIZE));
-					final LongArrayDataBlock block = (LongArrayDataBlock)n5reader.readBlock(inputDataset, new DatasetAttributes(dims, blockSize, DataType.UINT64, new GzipCompression()), blockPos);
+					final DataBlock<long[]> block = n5reader.readBlock(inputDataset, new DatasetAttributes(dims, blockSize, DataType.UINT64, new GzipCompression()), blockPos);
 					return new Tuple2<>(minMax, block.getData());
 				})
 				.flatMapToPair(input -> Arrays
