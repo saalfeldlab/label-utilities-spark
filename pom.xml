@@ -4,7 +4,7 @@
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
-		<version>44.0.0</version>
+		<version>45.0.0</version>
 	</parent>
 
 	<groupId>org.janelia.saalfeldlab</groupId>
@@ -99,15 +99,6 @@
 		<javadoc.skip>true</javadoc.skip>
 		<maven.javadoc.skip>${javadoc.skip}</maven.javadoc.skip>
 
-		<n5.version>4.0.1</n5.version>
-		<n5-aws-s3.version>5.0.0</n5-aws-s3.version>
-		<n5-google-cloud.version>6.0.0</n5-google-cloud.version>
-		<n5-universe.version>3.0.1</n5-universe.version>
-		<n5-hdf5.version>3.0.0</n5-hdf5.version>
-		<n5-zarr.version>2.0.1</n5-zarr.version>
-		<n5-imglib2.version>8.0.0</n5-imglib2.version>
-
-		<imglib2-label-multisets.version>0.14.0</imglib2-label-multisets.version>
 		<slf4j-api.version>1.7.36</slf4j-api.version>
 
 		<label-utilities.version>0.5.1</label-utilities.version>
