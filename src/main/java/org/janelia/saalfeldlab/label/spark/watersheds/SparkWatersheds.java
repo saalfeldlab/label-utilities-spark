@@ -53,7 +53,7 @@ import org.janelia.saalfeldlab.label.spark.Version;
 import org.janelia.saalfeldlab.n5.DataBlock;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.scicomp.n5.zstandard.ZstandardCompression;
 import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
@@ -227,8 +227,8 @@ public class SparkWatersheds {
 		attributes.put(OFFSET_KEY, offset);
 
 		final Map<String, DatasetAttributes> datasets = new HashMap<>();
-		Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT64, new GzipCompression())));
-		Arrays.asList(uint8Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT8, new GzipCompression())));
+		Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT64, new ZstandardCompression())));
+		Arrays.asList(uint8Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT8, new ZstandardCompression())));
 
 		if (hasHalo) {
 			prepareOutputDatasets(
@@ -339,8 +339,8 @@ public class SparkWatersheds {
 
 					final Interval relevantInterval = Intervals.expand(labels, negativeHalo);
 
-					final DatasetAttributes croppedAttributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression());
-					final DatasetAttributes watershedAttributes = new DatasetAttributes(outputDims, watershedBlockSize, DataType.UINT64, new GzipCompression());
+					final DatasetAttributes croppedAttributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new ZstandardCompression());
+					final DatasetAttributes watershedAttributes = new DatasetAttributes(outputDims, watershedBlockSize, DataType.UINT64, new ZstandardCompression());
 
 					// TODO do seeded watersheds
 					LOG.debug("Found watershed seeds {}", seeds);

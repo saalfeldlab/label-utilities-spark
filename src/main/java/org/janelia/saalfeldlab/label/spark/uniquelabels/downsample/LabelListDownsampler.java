@@ -12,7 +12,7 @@ import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.CompressionAdapter;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.scicomp.n5.zstandard.ZstandardCompression;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.slf4j.Logger;
@@ -185,7 +185,7 @@ public class LabelListDownsampler {
 				.ofNullable(reader.getAttribute(readDatasetName, DOWNSAMPLING_FACTORS_KEY, double[].class))
 				.orElse(DoubleStream.generate(() -> 1.0).limit(nDim).toArray());
 		final double[] accumulatedDownsamplingFactor = IntStream.range(0, nDim).mapToDouble(d -> previousDownsamplingFactor[d] * downsampleFactor[d]).toArray();
-		writer.createDataset(outputDatasetName, downsampledDimensions, blockSize, DataType.UINT64, new GzipCompression());
+		writer.createDataset(outputDatasetName, downsampledDimensions, blockSize, DataType.UINT64, new ZstandardCompression());
 		writer.setAttribute(outputDatasetName, DOWNSAMPLING_FACTORS_KEY, accumulatedDownsamplingFactor);
 
 		sc.parallelize(positions)

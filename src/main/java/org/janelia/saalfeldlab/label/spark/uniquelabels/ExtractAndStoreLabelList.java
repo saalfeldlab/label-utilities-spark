@@ -22,7 +22,7 @@ import org.apache.spark.api.java.function.Function;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.scicomp.n5.zstandard.ZstandardCompression;
 import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
@@ -167,7 +167,7 @@ public class ExtractAndStoreLabelList implements Function<Tuple2<long[], long[]>
 				grid.getImgDimensions(),
 				blockSize,
 				DataType.UINT64,
-				new GzipCompression());
+				new ZstandardCompression());
 		n5writer.writeBlock(outputDataset, attributes, block);
 		return maxVal;
 	}

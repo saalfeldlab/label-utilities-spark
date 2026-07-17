@@ -8,9 +8,9 @@ import net.imglib2.view.Views;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
+import org.janelia.scicomp.n5.zstandard.ZstandardCompression;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -32,7 +32,7 @@ public class MakeEmptyMask {
 				rawAttributes.getDimensions(),
 				rawAttributes.getBlockSize(),
 				DataType.UINT8,
-				new GzipCompression());
+				new ZstandardCompression());
 
 		container.createDataset(maskPath, maskAttributes);
 		container.setAttribute(maskPath, "value_range", new double[]{0.0, 1.0});

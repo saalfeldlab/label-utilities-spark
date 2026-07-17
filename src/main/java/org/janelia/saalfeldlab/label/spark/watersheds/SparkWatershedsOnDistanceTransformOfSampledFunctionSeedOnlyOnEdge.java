@@ -57,6 +57,7 @@ import org.apache.spark.api.java.function.PairFunction;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.label.spark.Version;
 import org.janelia.saalfeldlab.n5.*;
+import org.janelia.scicomp.n5.zstandard.ZstandardCompression;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.janelia.saalfeldlab.n5.universe.N5Factory;
 import org.slf4j.Logger;
@@ -226,8 +227,8 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 		attributes.put(OFFSET_KEY, offset);
 
 		final Map<String, DatasetAttributes> datasets = new HashMap<>();
-		Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT64, new GzipCompression())));
-		Arrays.asList(float64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.FLOAT64, new GzipCompression())));
+		Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT64, new ZstandardCompression())));
+		Arrays.asList(float64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.FLOAT64, new ZstandardCompression())));
 		LOG.info("uint64 datasets: {}", (Object)uint64Datasets);
 		LOG.info("float64 datasets: {}", (Object)float64Datasets);
 		LOG.info("Datasets: {}", datasets);
@@ -358,7 +359,7 @@ public class SparkWatershedsOnDistanceTransformOfSampledFunctionSeedOnlyOnEdge {
 						}
 					}
 
-					final Function<DataType, DatasetAttributes> attributes = dt -> new DatasetAttributes(outputDims, blockSize, dt, new GzipCompression());
+					final Function<DataType, DatasetAttributes> attributes = dt -> new DatasetAttributes(outputDims, blockSize, dt, new ZstandardCompression());
 
 					LOG.debug("Saving relief");
 					// Save relief

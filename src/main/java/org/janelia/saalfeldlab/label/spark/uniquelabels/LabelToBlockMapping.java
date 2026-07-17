@@ -18,6 +18,7 @@ import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookup;
 import org.janelia.saalfeldlab.labels.blocks.LabelBlockLookupAdapter;
 import org.janelia.saalfeldlab.labels.blocks.n5.LabelBlockLookupFromN5Relative;
 import org.janelia.saalfeldlab.n5.*;
+import org.janelia.scicomp.n5.zstandard.ZstandardCompression;
 import org.janelia.saalfeldlab.n5.universe.N5Factory;
 import org.janelia.saalfeldlab.n5.universe.StorageFormat;
 import org.slf4j.Logger;
@@ -125,8 +126,7 @@ public class LabelToBlockMapping {
 			final String[] sortedScaleDirs = N5Helpers.listAndSortScaleDatasets(reader, inputDataset);
 			for (int level = 0; level < sortedScaleDirs.length; ++level) {
 				final String scaleDataset = sortedScaleDirs[level];
-				//				writer.createDataset( enclosingGroup + "/" + scaleDataset, new long[] { Long.MAX_VALUE }, new int[] { stepSize }, DataType.INT8, new GzipCompression() );
-				writer.createDataset(String.format(enclosingGroup + "/" + pattern, level), new long[]{Long.MAX_VALUE}, new int[]{stepSize}, DataType.INT8, new GzipCompression());
+				writer.createDataset(String.format(enclosingGroup + "/" + pattern, level), new long[]{Long.MAX_VALUE}, new int[]{stepSize}, DataType.INT8, new ZstandardCompression());
 				LOG.info("Creating mapping for scale dataset {} in group {} of n5 container {} at target {}", scaleDataset, inputDataset, inputN5, enclosingGroup);
 				createMappingN5(
 						sc,
@@ -191,7 +191,8 @@ public class LabelToBlockMapping {
 							new BasicNameValuePair("call", "label-block-mapping-create-mapping-n5")
 					).toString();
 					final N5Reader n5reader = Singleton.get(readerCacheKey, () -> N5Helpers.n5Reader(inputN5, N5Helpers.DEFAULT_BLOCK_SIZE));
-					final DataBlock<long[]> block = n5reader.readBlock(inputDataset, new DatasetAttributes(dims, blockSize, DataType.UINT64, new GzipCompression()), blockPos);
+					DatasetAttributes inputDatasetAttributes = n5reader.getDatasetAttributes(inputDataset);
+					final DataBlock<long[]> block = n5reader.readBlock(inputDataset, inputDatasetAttributes, blockPos);
 					return new Tuple2<>(minMax, block.getData());
 				})
 				.flatMapToPair(input -> Arrays
@@ -257,7 +258,8 @@ public class LabelToBlockMapping {
 							new BasicNameValuePair("call", "label-block-mapping-create-mapping")
 					).toString();
 					final N5Reader n5reader = Singleton.get(readerCacheKey, () -> N5Helpers.n5Reader(inputN5, N5Helpers.DEFAULT_BLOCK_SIZE));
-					final DataBlock<long[]> block = n5reader.readBlock(inputDataset, new DatasetAttributes(dims, blockSize, DataType.UINT64, new GzipCompression()), blockPos);
+					DatasetAttributes inputDatasetAttributes = n5reader.getDatasetAttributes(inputDataset);
+					final DataBlock<long[]> block = n5reader.readBlock(inputDataset, inputDatasetAttributes, blockPos);
 					return new Tuple2<>(minMax, block.getData());
 				})
 				.flatMapToPair(input -> Arrays

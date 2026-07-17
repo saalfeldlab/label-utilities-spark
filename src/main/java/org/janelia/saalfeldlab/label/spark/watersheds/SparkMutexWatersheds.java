@@ -38,7 +38,7 @@ import org.janelia.saalfeldlab.imglib2.mutex.MutexWatershed;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.scicomp.n5.zstandard.ZstandardCompression;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
@@ -374,9 +374,9 @@ public class SparkMutexWatersheds {
 
 		final N5Writer n5Out = outputContainer.get();
 
-		n5Out.createDataset(mutexWatershedDataset, outputSize, blockSize, DataType.UINT64, new GzipCompression());
-		n5Out.createDataset(mutexWatershedRelabeledDataset, outputSize, blockSize, DataType.UINT64, new GzipCompression());
-		n5Out.createDataset(mutexWatershedMergedDataset, outputSize, blockSize, DataType.UINT64, new GzipCompression());
+		n5Out.createDataset(mutexWatershedDataset, outputSize, blockSize, DataType.UINT64, new ZstandardCompression());
+		n5Out.createDataset(mutexWatershedRelabeledDataset, outputSize, blockSize, DataType.UINT64, new ZstandardCompression());
+		n5Out.createDataset(mutexWatershedMergedDataset, outputSize, blockSize, DataType.UINT64, new ZstandardCompression());
 		n5Out.setAttribute(mutexWatershedMergedDataset, "completedSuccessfully", false);
 
 		final double primitiveThreshold = threshold == null ? -1.0 : threshold;
@@ -508,7 +508,7 @@ public class SparkMutexWatersheds {
 
 						final long[] blockOffset = new long[min.length];
 						Arrays.setAll(blockOffset, d -> min[d] / blockSize[d]);
-						final DatasetAttributes attributes = new DatasetAttributes(outputSize, blockSize, DataType.UINT64, new GzipCompression());
+						final DatasetAttributes attributes = new DatasetAttributes(outputSize, blockSize, DataType.UINT64, new ZstandardCompression());
 
 
 
@@ -578,7 +578,7 @@ public class SparkMutexWatersheds {
 
 					final long[] blockOffset = new long[bwo.min.length];
 					Arrays.setAll(blockOffset, d -> bwo.min[d] / blockSize[d]);
-					final DatasetAttributes attributes = new DatasetAttributes(outputSize, blockSize, DataType.UINT64, new GzipCompression());
+					final DatasetAttributes attributes = new DatasetAttributes(outputSize, blockSize, DataType.UINT64, new ZstandardCompression());
 					N5Utils.saveBlock(relabeled, writer, mutexWatershedRelabeledDataset, attributes, blockOffset);
 				});
 
@@ -689,7 +689,7 @@ public class SparkMutexWatersheds {
 
 					final long[] blockOffset = new long[bwo.min.length];
 					Arrays.setAll(blockOffset, d -> bwo.min[d] / blockSize[d]);
-					final DatasetAttributes attributes = new DatasetAttributes(outputSize, blockSize, DataType.UINT64, new GzipCompression());
+					final DatasetAttributes attributes = new DatasetAttributes(outputSize, blockSize, DataType.UINT64, new ZstandardCompression());
 					N5Utils.saveBlock(remapped, writer, mutexWatershedMergedDataset, attributes, blockOffset);
 				});
 		Singleton.clear();

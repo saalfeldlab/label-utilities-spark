@@ -26,7 +26,7 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.scicomp.n5.zstandard.ZstandardCompression;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.slf4j.Logger;
@@ -231,7 +231,7 @@ public class MakePredictionMask {
 		final long[] validInputSizeInOutputCoordinates = convertAsLong(divide(inputSizeWorld, args.outputResolution), Math::floor);
 
 		final N5WriterSupplier n5out = new N5WriterSupplier(args.maskContainer, true, true);
-		n5out.get().createDataset(args.maskDataset, outputDatasetSize, args.blockSize(), DataType.UINT8, new GzipCompression());
+		n5out.get().createDataset(args.maskDataset, outputDatasetSize, args.blockSize(), DataType.UINT8, new ZstandardCompression());
 		n5out.get().setAttribute(args.maskDataset, NETWORK_SIZE_DIFF_KEY, networkSizeDiff);
 		n5out.get().setAttribute(args.maskDataset, "resolution", args.outputResolution);
 		n5out.get().setAttribute(args.maskDataset, "offset", args.outputOffset);
@@ -279,7 +279,7 @@ public class MakePredictionMask {
 						final long[] max = block._1()._2();
 						final Interval interval = new FinalInterval(min, max);
 						final RandomAccessible<UnsignedByteType> mask = inputMask.get();
-						final DatasetAttributes attributes = new DatasetAttributes(outputDatasetSize, blockSize, DataType.UINT8, new GzipCompression());
+						final DatasetAttributes attributes = new DatasetAttributes(outputDatasetSize, blockSize, DataType.UINT8, new ZstandardCompression());
 						final double[] minReal = LongStream.of(min).asDoubleStream().toArray();
 						final double[] maxReal = LongStream.of(max).asDoubleStream().toArray();
 						//						final Scale outputScale = new Scale(outputVoxelSize);

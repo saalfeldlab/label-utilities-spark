@@ -2,13 +2,11 @@ package org.janelia.saalfeldlab.label.spark.convert;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.pivovarit.function.ThrowingSupplier;
 import net.imglib2.FinalInterval;
 import net.imglib2.Interval;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.algorithm.util.Grids;
 import net.imglib2.algorithm.util.Singleton;
-import net.imglib2.cache.img.CachedCellImg;
 import net.imglib2.converter.Converters;
 import net.imglib2.type.NativeType;
 import net.imglib2.type.label.FromIntegerTypeConverter;
@@ -21,13 +19,13 @@ import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.api.java.function.Function0;
 import org.janelia.saalfeldlab.label.spark.N5Helpers;
 import org.janelia.saalfeldlab.n5.Compression;
 import org.janelia.saalfeldlab.n5.CompressionAdapter;
 import org.janelia.saalfeldlab.n5.DataType;
-import org.janelia.saalfeldlab.n5.DatasetAttributes;
 import org.janelia.saalfeldlab.n5.GsonUtils;
-import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.scicomp.n5.zstandard.ZstandardCompression;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5LabelMultisets;
@@ -45,7 +43,6 @@ import scala.Tuple2;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -95,9 +92,6 @@ public class ConvertToLabelMultisetType {
 		@Option(names = {"--block-size", "-b"}, paramLabel = "BLOCK_SIZE", description = "Size of cells to use in the output N5 dataset. Defaults to 64. Either single integer value for isotropic block size or comma-seperated list of block size per dimension", split = ",")
 		private int[] blockSize;
 
-		@Option(names = {"--compression", "-c"}, paramLabel = "COMPRESSION", description = "Compression type to use in output N5 dataset")
-		public String compressionType = "{\"type\":\"gzip\",\"level\":-1}";
-
 		@Option(
 				names = {"--reverse-array-attributes"},
 				required = false,
@@ -113,10 +107,7 @@ public class ConvertToLabelMultisetType {
 			final Gson gson = new GsonBuilder()
 					.registerTypeHierarchyAdapter(Compression.class, CompressionAdapter.getJsonAdapter())
 					.create();
-			final Compression compression = new GzipCompression();// .fromJson(
-			// compressionType,
-			// Compression.class
-			// );
+			final Compression compression = new ZstandardCompression();
 			final int nDim = N5Helpers.n5Reader(this.inputN5).getDatasetAttributes(this.inputDataset).getNumDimensions();
 			final int[] blockSize = this.blockSize.length < nDim ? IntStream.generate(() -> this.blockSize[0]).limit(nDim).toArray() : this.blockSize;
 
@@ -168,39 +159,52 @@ public class ConvertToLabelMultisetType {
 			final String outputGroupName,
 			final String outputDatasetName,
 			final Compression compression,
-			final boolean reverse) throws IOException {
+			final boolean reverse) {
 
-		final ThrowingSupplier<CachedCellImg<I, ?>, URISyntaxException> getCachedImg = () -> {
+		final N5Reader reader = N5Helpers.n5Reader(inputGroup, blockSize);
+		final int[] inputBlockSize = reader.getDatasetAttributes(inputDataset).getBlockSize();
+		final Map<String, Object> attributesToCopy = resolveAttributesToCopy(reader, inputDataset, reverse);
+
+		final Function0<RandomAccessibleInterval<I>> imgSupplier = () -> {
 			final URI inputGroupUri = StorageFormat.parseUri(inputGroup).getB();
 			final String inputImgCacheKey = new URIBuilder(inputGroupUri)
 					.setParameters(
 							new BasicNameValuePair("call", "convert-to-label-multiset-type"),
 							new BasicNameValuePair("dataset", inputDataset)
 					).toString();
-
 			return Singleton.get(inputImgCacheKey, () -> N5Helpers.openBounded(N5Helpers.n5Reader(inputGroup, blockSize), inputDataset));
 		};
 
-		final N5Reader reader = N5Helpers.n5Reader(inputGroup, blockSize);
-		final DatasetAttributes inputDataAttrs = reader.getDatasetAttributes(inputDataset);
-		final int[] inputBlockSize = inputDataAttrs.getBlockSize();
-		final RandomAccessibleInterval<I> img = getCachedImg.uncheck().get();
-		final Map<String, Class<?>> attributeNames;
-		if (reader instanceof ZarrKeyValueReader) {
-			attributeNames = Optional.of(reader)
-					.map(ZarrKeyValueReader.class::cast)
-					.map(it -> it.getZAttributes(inputDataset))
-					.map(GsonUtils::listAttributes)
-					.orElseGet(HashMap::new);
-		} else {
-			attributeNames = reader.listAttributes(inputDataset);
-			List.of(
-					LABEL_MULTISETTYPE_KEY,
-					DATA_TYPE_KEY,
-					COMPRESSION_KEY,
-					BLOCK_SIZE_KEY,
-					DIMENSIONS_KEY
-			).forEach(attributeNames::remove);
+		convertToLabelMultisetType(sc, imgSupplier, inputBlockSize, attributesToCopy, blockSize, outputGroupName, outputDatasetName, compression);
+	}
+
+	public static <I extends IntegerType<I> & NativeType<I>> void convertToLabelMultisetType(
+			final JavaSparkContext sc,
+			final Function0<RandomAccessibleInterval<I>> imgSupplier,
+			final int[] inputBlockSize,
+			final int[] blockSize,
+			final String outputGroupName,
+			final String outputDatasetName,
+			final Compression compression) {
+
+		convertToLabelMultisetType(sc, imgSupplier, inputBlockSize, new HashMap<>(), blockSize, outputGroupName, outputDatasetName, compression);
+	}
+
+	private static <I extends IntegerType<I> & NativeType<I>> void convertToLabelMultisetType(
+			final JavaSparkContext sc,
+			final Function0<RandomAccessibleInterval<I>> imgSupplier,
+			final int[] inputBlockSize,
+			final Map<String, Object> attributesToCopy,
+			final int[] blockSize,
+			final String outputGroupName,
+			final String outputDatasetName,
+			final Compression compression) {
+
+		final RandomAccessibleInterval<I> img;
+		try {
+			img = imgSupplier.call();
+		} catch (final Exception e) {
+			throw new RuntimeException("Unable to get source image", e);
 		}
 
 		final int nDim = img.numDimensions();
@@ -224,8 +228,8 @@ public class ConvertToLabelMultisetType {
 		}
 		writer.createDataset(outputDatasetName, dimensions, blockSize, DataType.UINT8, compression);
 		writer.setAttribute(outputDatasetName, LABEL_MULTISETTYPE_KEY, true);
-		for (final Entry<String, Class<?>> entry : attributeNames.entrySet())
-			writer.setAttribute(outputDatasetName, entry.getKey(), N5Helpers.reverseInplaceAndReturn(reader.getAttribute(inputDataset, entry.getKey(), entry.getValue()), reverse));
+		for (final Entry<String, Object> entry : attributesToCopy.entrySet())
+			writer.setAttribute(outputDatasetName, entry.getKey(), entry.getValue());
 
 		final int[] parallelizeBlockSize = new int[blockSize.length];
 		if (Intervals.numElements(blockSize) >= Intervals.numElements(inputBlockSize)) {
@@ -246,13 +250,7 @@ public class ConvertToLabelMultisetType {
 				.map(intervalMinMax -> {
 					final Interval interval = new FinalInterval(intervalMinMax._1(), intervalMinMax._2());
 
-					final URI uri = StorageFormat.parseUri(inputGroup).getB();
-					final String imgCacheKey = new URIBuilder(uri)
-							.setParameters(
-									new BasicNameValuePair("call", "convert-to-label-multiset-max-id"),
-									new BasicNameValuePair("dataset", inputDataset)
-							).toString();
-					final CachedCellImg<I, ?> source = Singleton.get(imgCacheKey, () -> N5Helpers.openBounded(N5Helpers.n5Reader(inputGroup, blockSize), inputDataset));
+					final RandomAccessibleInterval<I> source = imgSupplier.call();
 					final RandomAccessibleInterval<I> blockImg = Views.interval(source, interval);
 
 					final FromIntegerTypeConverter<I> converter = new FromIntegerTypeConverter<>();
@@ -279,5 +277,29 @@ public class ConvertToLabelMultisetType {
 
 		Singleton.clear();
 		writer.setAttribute(outputDatasetName, MAX_ID_KEY, maxId);
+	}
+
+	private static Map<String, Object> resolveAttributesToCopy(final N5Reader reader, final String inputDataset, final boolean reverse) {
+		final Map<String, Class<?>> attributeNames;
+		if (reader instanceof ZarrKeyValueReader) {
+			attributeNames = Optional.of(reader)
+					.map(ZarrKeyValueReader.class::cast)
+					.map(it -> it.getZAttributes(inputDataset))
+					.map(GsonUtils::listAttributes)
+					.orElseGet(HashMap::new);
+		} else {
+			attributeNames = reader.listAttributes(inputDataset);
+			List.of(
+					LABEL_MULTISETTYPE_KEY,
+					DATA_TYPE_KEY,
+					COMPRESSION_KEY,
+					BLOCK_SIZE_KEY,
+					DIMENSIONS_KEY
+			).forEach(attributeNames::remove);
+		}
+		final Map<String, Object> resolved = new HashMap<>();
+		for (final Entry<String, Class<?>> entry : attributeNames.entrySet())
+			resolved.put(entry.getKey(), N5Helpers.reverseInplaceAndReturn(reader.getAttribute(inputDataset, entry.getKey(), entry.getValue()), reverse));
+		return resolved;
 	}
 }
