@@ -49,7 +49,7 @@ import org.janelia.saalfeldlab.label.spark.Version;
 import org.janelia.saalfeldlab.n5.DataBlock;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.scicomp.n5.zstandard.ZstandardCompression;
 import org.janelia.saalfeldlab.n5.LongArrayDataBlock;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
@@ -317,11 +317,11 @@ public class SparkRain {
 		attributes.put(OFFSET_KEY, offset);
 
 		final Map<String, DatasetAttributes> datasets = new HashMap<>();
-		Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT64, new GzipCompression())));
-		Arrays.asList(uint8Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT8, new GzipCompression())));
+		Arrays.asList(uint64Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT64, new ZstandardCompression())));
+		Arrays.asList(uint8Datasets).forEach(ds -> datasets.put(ds, new DatasetAttributes(outputDims, args.blockSize, DataType.UINT8, new ZstandardCompression())));
 
 		if (args.smoothAffinitiesSigma > 0.0)
-			prepareOutputDataset(n5out.get(), args.smoothedAffinities, new DatasetAttributes(inputDims, IntStream.concat(IntStream.of(args.blockSize), IntStream.of(1)).toArray(), DataType.FLOAT32, new GzipCompression()), attributes);
+			prepareOutputDataset(n5out.get(), args.smoothedAffinities, new DatasetAttributes(inputDims, IntStream.concat(IntStream.of(args.blockSize), IntStream.of(1)).toArray(), DataType.FLOAT32, new ZstandardCompression()), attributes);
 
 		if (hasHalo) {
 			prepareOutputDatasets(
@@ -469,8 +469,8 @@ public class SparkRain {
 					final ArrayImg<UnsignedLongType, LongArray> labels = ArrayImgs.unsignedLongs(parentsAndRoots.getFirst(), dims);
 					final Interval relevantInterval = Intervals.expand(labels, negativeHalo);
 
-					final DatasetAttributes croppedAttributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new GzipCompression());
-					final DatasetAttributes watershedAttributes = new DatasetAttributes(outputDims, watershedBlockSize, DataType.UINT64, new GzipCompression());
+					final DatasetAttributes croppedAttributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT64, new ZstandardCompression());
+					final DatasetAttributes watershedAttributes = new DatasetAttributes(outputDims, watershedBlockSize, DataType.UINT64, new ZstandardCompression());
 
 					LOG.debug("Saving cropped watersheds to {}", hasHalo ? String.format(croppedDatasetPattern, watersheds) : watersheds);
 
@@ -543,7 +543,7 @@ public class SparkRain {
 					final List<Point> seeds = Watersheds.collectSeeds(watershedSeedsMaskImg);
 					LOG.debug("Found watershed seeds {}", seeds);
 					final RandomAccessibleInterval<UnsignedByteType> watershedSeedsMaskImgUint8 = Converters.convert(watershedSeedsMaskImg, (src, tgt) -> tgt.set(src.get() ? 1 : 0), new UnsignedByteType());
-					final DatasetAttributes croppedWatershedSeedsAtributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT8, new GzipCompression());
+					final DatasetAttributes croppedWatershedSeedsAtributes = new DatasetAttributes(outputDims, blockSize, DataType.UINT8, new ZstandardCompression());
 					N5Utils.saveBlock(Views.interval(watershedSeedsMaskImgUint8, relevantInterval), n5Writer, hasHalo ? String.format(croppedDatasetPattern, watershedSeeds) : watershedSeeds, croppedWatershedSeedsAtributes, blockOffset);
 					if (hasHalo) {
 						throw new UnsupportedOperationException("Need to implement halo support!");
@@ -679,7 +679,7 @@ public class SparkRain {
 			final LongUnaryOperator idMapping) throws IOException {
 
 		final DatasetAttributes attributes = n5.getDatasetAttributes(dataset);
-		final LongArrayDataBlock block = ((LongArrayDataBlock)n5.readBlock(dataset, attributes, blockPos));
+		final DataBlock<long[]> block = n5.readBlock(dataset, attributes, blockPos);
 		final long[] data = block.getData();
 		for (int i = 0; i < data.length; ++i) {
 			data[i] = idMapping.applyAsLong(data[i]);

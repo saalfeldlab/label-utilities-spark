@@ -4,12 +4,12 @@
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
-		<version>37.0.0</version>
+		<version>45.0.0</version>
 	</parent>
 
 	<groupId>org.janelia.saalfeldlab</groupId>
 	<artifactId>label-utilities-spark</artifactId>
-	<version>1.1.1-SNAPSHOT</version>
+	<version>1.2.0-SNAPSHOT</version>
 
 	<name>N5-Label-Multisets-Spark</name>
 	<description>Spark based tools for label data.</description>
@@ -99,15 +99,6 @@
 		<javadoc.skip>true</javadoc.skip>
 		<maven.javadoc.skip>${javadoc.skip}</maven.javadoc.skip>
 
-		<n5.version>3.3.1</n5.version>
-		<n5-aws-s3.version>4.2.2</n5-aws-s3.version>
-		<n5-google-cloud.version>4.1.2</n5-google-cloud.version>
-		<n5-universe.version>2.0.1</n5-universe.version>
-		<n5-hdf5.version>2.2.0</n5-hdf5.version>
-		<n5-zarr.version>1.4.0</n5-zarr.version>
-		<n5-imglib2.version>7.0.0</n5-imglib2.version>
-
-		<imglib2-label-multisets.version>0.14.0</imglib2-label-multisets.version>
 		<slf4j-api.version>1.7.36</slf4j-api.version>
 
 		<label-utilities.version>0.5.1</label-utilities.version>

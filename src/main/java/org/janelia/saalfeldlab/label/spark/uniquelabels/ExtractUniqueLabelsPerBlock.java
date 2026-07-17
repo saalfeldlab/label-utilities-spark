@@ -12,7 +12,7 @@ import org.janelia.saalfeldlab.label.spark.exception.InvalidDataset;
 import org.janelia.saalfeldlab.label.spark.exception.InvalidN5Container;
 import org.janelia.saalfeldlab.n5.DataType;
 import org.janelia.saalfeldlab.n5.DatasetAttributes;
-import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.scicomp.n5.zstandard.ZstandardCompression;
 import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.universe.N5Factory;
@@ -126,7 +126,7 @@ public class ExtractUniqueLabelsPerBlock {
 		}
 
 		final N5Writer writer = n5Writer(outputN5, blockSize);
-		final DatasetAttributes outputAttributes = new DatasetAttributes(dims, blockSize, DataType.UINT64, new GzipCompression());
+		final DatasetAttributes outputAttributes = new DatasetAttributes(dims, blockSize, DataType.UINT64, new ZstandardCompression());
 		writer.createDataset(outputDataset, outputAttributes);
 
 		final List<Tuple2<long[], long[]>> intervals = Grids
